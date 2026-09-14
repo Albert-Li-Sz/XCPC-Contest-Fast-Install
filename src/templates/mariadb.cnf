@@ -1,0 +1,7 @@
+[mariadbd]
+bind-address = 127.0.0.1
+max_connections = 200
+max_allowed_packet = 512M
+innodb_buffer_pool_size = @@DB_BUFFER@@M
+innodb_log_file_size = 256M
+loose-innodb-snapshot-isolation = OFF

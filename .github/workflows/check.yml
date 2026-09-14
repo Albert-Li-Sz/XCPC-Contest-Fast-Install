@@ -1,0 +1,32 @@
+name: Check installer
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          python -m pip install 'ansible-core>=2.19,<2.22'
+      - name: Check generated entry and behavior
+        run: |
+          python scripts/build.py --check
+          bash -n main.sh
+          bash -n src/docker/start.sh
+          bash -n batch/start.sh
+          shellcheck src/entry.sh src/docker/start.sh batch/start.sh
+          python -B -m unittest discover -s tests -v
+      - name: Validate batch tasks without SSH
+        working-directory: batch
+        run: |
+          ansible-playbook -i inventory.example.yml deploy.yml --syntax-check -e judge_api_password=syntax-only

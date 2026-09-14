@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<server description="ICPC contest data server">
+  <featureManager>
+    <feature>pages-3.1</feature>
+    <feature>jndi-1.0</feature>
+    <feature>websocket-2.1</feature>
+    <feature>appSecurity-5.0</feature>
+    <feature>servlet-6.0</feature>
+    <feature>cdi-4.0</feature>
+  </featureManager>
+  <httpEndpoint host="*" httpPort="-1" httpsPort="8443" id="defaultHttpEndpoint">
+    <tcpOptions soReuseAddr="true" />
+    <httpOptions ThrowIOEForInboundConnections="true" />
+  </httpEndpoint>
+  <httpSession invalidationTimeout="8h" idReuse="true" />
+  <keyStore id="defaultKeyStore" password="${env.CDS_KEYSTORE_PASSWORD}" location="/etc/icpc-cds/tls/cds.p12" type="PKCS12" />
+  <jndiEntry jndiName="icpc.cds.config" value="/etc/icpc-cds" />
+  <webApplication id="CDS" location="CDS.war" name="CDS" contextRoot="/" />
+  <logging maxFileSize="20" maxFiles="10" consoleLogLevel="INFO" />
+</server>

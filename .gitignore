@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.ansible/
+logs/
+*.secret
+*.key
+*.p12
+inventory.yml
+host_vars/
+.DS_Store

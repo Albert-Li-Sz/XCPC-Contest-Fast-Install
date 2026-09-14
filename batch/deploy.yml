@@ -1,0 +1,73 @@
+---
+- name: Deploy Docker judgehosts with the same bundled installer
+  hosts: judgehosts
+  become: true
+  gather_facts: false
+  vars_prompt:
+    - name: judge_api_password
+      prompt: DOMjudge judgehost API password (not SSH/admin password)
+      private: true
+  pre_tasks:
+    - name: Require unique machine identities and an API password
+      ansible.builtin.assert:
+        that:
+          - judge_api_password | default('') | length > 0
+          - judge_hostname is defined
+          - judge_cpus is defined
+          - judge_api_url is defined
+          - groups['judgehosts'] | map('extract', hostvars, 'judge_hostname') | list | unique | length == groups['judgehosts'] | length
+        quiet: true
+      no_log: true
+    - name: Ensure Python on a fresh target (skip mutation for --check)
+      ansible.builtin.raw: >-
+        command -v python3 >/dev/null ||
+        (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3)
+      changed_when: false
+      when: not ansible_check_mode
+  tasks:
+    - name: Stage installer and temporary credentials
+      when: not ansible_check_mode
+      block:
+        - name: Allocate private staging directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: xcpc-batch-
+          register: stage
+        - name: Copy self-contained installer
+          ansible.builtin.copy:
+            src: ../main.sh
+            dest: '{{ stage.path }}/main.sh'
+            mode: '0700'
+        - name: Write API password without showing it in output
+          ansible.builtin.copy:
+            content: '{{ judge_api_password }}'
+            dest: '{{ stage.path }}/password'
+            mode: '0600'
+          no_log: true
+        - name: Copy public API CA when provided
+          ansible.builtin.copy:
+            src: '{{ judge_api_ca_file }}'
+            dest: '{{ stage.path }}/api-ca.crt'
+            mode: '0600'
+          when: judge_api_ca_file is defined
+        - name: Run installer (one CPU container per selected ID)
+          ansible.builtin.command:
+            argv: >-
+              {{ ['bash', stage.path + '/main.sh', '--role', 'judgehost', '--yes',
+                  '--api-url', judge_api_url, '--api-user', judge_api_user | default('judgehost'),
+                  '--hostname', judge_hostname, '--cpus', judge_cpus | string,
+                  '--timezone', judge_timezone | default('Asia/Shanghai'),
+                  '--api-password-file', stage.path + '/password']
+                 + (['--api-ca-file', stage.path + '/api-ca.crt'] if judge_api_ca_file is defined else [])
+                 + (['--artifact-dir', judge_artifact_dir] if judge_artifact_dir is defined else []) }}
+          register: installed
+          changed_when: true
+        - name: Show per-host installation result
+          ansible.builtin.debug:
+            var: installed.stdout_lines
+      always:
+        - name: Remove only this run's private staging files
+          ansible.builtin.file:
+            path: '{{ stage.path }}'
+            state: absent
+          when: stage is defined and stage.path is defined

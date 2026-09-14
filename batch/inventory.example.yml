@@ -1,0 +1,22 @@
+all:
+  children:
+    judgehosts:
+      vars:
+        ansible_user: root
+        ansible_python_interpreter: /usr/bin/python3
+        judge_api_url: http://192.0.2.10/api/
+        judge_api_user: judgehost
+        judge_timezone: Asia/Shanghai
+        # Optional: public CA file on the control machine for a private HTTPS API.
+        # judge_api_ca_file: /absolute/path/domjudge-ca.crt
+        # Optional: artifact directory already present on each target machine.
+        # judge_artifact_dir: /opt/install-packages
+      hosts:
+        judge01:
+          ansible_host: 192.0.2.21
+          judge_hostname: judge01
+          judge_cpus: '1'
+        judge02:
+          ansible_host: 192.0.2.22
+          judge_hostname: judge02
+          judge_cpus: '1,3'

@@ -1,0 +1,9 @@
+-DICPC_OGG=false
+-Djava.awt.headless=true
+-Duser.timezone=@@TIMEZONE@@
+-Xms256m
+-Xmx1024m
+-XX:MaxDirectMemorySize=256m
+-XX:+ExitOnOutOfMemoryError
+-Djava.io.tmpdir=/var/lib/icpc-cds/tmp
+-Dsentry.enabled=false

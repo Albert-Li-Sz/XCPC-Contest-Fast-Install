@@ -1,0 +1,29 @@
+[Unit]
+Description=ICPC Contest Data Server
+Wants=network-online.target
+After=network-online.target nginx.service mariadb.service
+
+[Service]
+Type=simple
+User=cds
+Group=cds
+WorkingDirectory=/var/lib/icpc-cds
+EnvironmentFile=/etc/icpc-cds/server.env
+Environment=WLP_USER_DIR=/var/lib/icpc-cds/usr
+Environment=WLP_OUTPUT_DIR=/var/lib/icpc-cds/output
+ExecStart=/opt/icpctools/cds/wlp/bin/server run cds
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/icpc-cds
+MemoryMax=1792M
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
