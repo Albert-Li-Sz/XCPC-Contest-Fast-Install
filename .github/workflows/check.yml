@@ -22,9 +22,8 @@ jobs:
         run: |
           python scripts/build.py --check
           bash -n main.sh
-          bash -n src/docker/start.sh
           bash -n batch/start.sh
-          shellcheck src/entry.sh src/docker/start.sh batch/start.sh
+          shellcheck src/entry.sh batch/start.sh
           python -B -m unittest discover -s tests -v
       - name: Validate batch tasks without SSH
         working-directory: batch

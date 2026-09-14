@@ -9,8 +9,6 @@ all:
         judge_timezone: Asia/Shanghai
         # Optional: public CA file on the control machine for a private HTTPS API.
         # judge_api_ca_file: /absolute/path/domjudge-ca.crt
-        # Optional: artifact directory already present on each target machine.
-        # judge_artifact_dir: /opt/install-packages
       hosts:
         judge01:
           ansible_host: 192.0.2.21

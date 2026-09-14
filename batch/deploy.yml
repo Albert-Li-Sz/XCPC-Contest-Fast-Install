@@ -58,8 +58,7 @@
                   '--hostname', judge_hostname, '--cpus', judge_cpus | string,
                   '--timezone', judge_timezone | default('Asia/Shanghai'),
                   '--api-password-file', stage.path + '/password']
-                 + (['--api-ca-file', stage.path + '/api-ca.crt'] if judge_api_ca_file is defined else [])
-                 + (['--artifact-dir', judge_artifact_dir] if judge_artifact_dir is defined else []) }}
+                 + (['--api-ca-file', stage.path + '/api-ca.crt'] if judge_api_ca_file is defined else []) }}
           register: installed
           changed_when: true
         - name: Show per-host installation result

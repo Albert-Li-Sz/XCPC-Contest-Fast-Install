@@ -1,9 +1,8 @@
-"""Build exact-version judgehost image and run one managed container per CPU."""
+"""Run the official latest judgehost image, with one managed container per CPU."""
 import grp
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import pwd
 import re
@@ -11,11 +10,10 @@ import shutil
 import subprocess
 import time
 
-from common import (InstallError, CACHE, STATE_DIR, mkdir, write, link, request, wait_for)
+from common import (InstallError, mkdir, write, link, request, wait_for)
 
 DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
-IMAGE = "xcpc-local/judgehost:9.0.1"
-BASE_IMAGE = "domjudge/judgehost@sha256:4c01f07e49023bcadd92255786372ec4c5fb5335bec5c9366f07b1fdddb28567"
+IMAGE = "domjudge/judgehost:latest"
 CONFIG = Path("/etc/xcpc-judgehost")
 OWNER = "xcpc-fast-install"
 
@@ -40,7 +38,7 @@ def spec(cfg, cpu):
     return {
         "cpu": cpu, "hostname": cfg["hostname"], "api_url": cfg["api_url"],
         "api_user": cfg["api_user"], "timezone": cfg["timezone"], "uid": uid_for(cpu),
-        "image": IMAGE, "base_image": BASE_IMAGE,
+        "image": IMAGE, "startup": "official-with-optional-ca-v1",
     }
 
 
@@ -61,12 +59,53 @@ def run_args(cfg, cpu):
         "--mount", f"type=bind,src={CONFIG}/secrets,dst=/run/xcpc-secrets,readonly",
         "--mount", f"type=volume,src={name}-judgings,dst=/opt/domjudge/judgehost/judgings",
         "--mount", f"type=volume,src={name}-logs,dst=/opt/domjudge/judgehost/log",
-        "--env", "DOMJUDGE_API_URL=" + cfg["api_url"],
+        # Official startup appends api/v4 itself; supply the site root.
+        "--env", "DOMSERVER_BASEURL=" + cfg["api_url"].removesuffix("api/"),
         "--env", "JUDGEDAEMON_USERNAME=" + cfg["api_user"],
         "--env", "JUDGEDAEMON_PASSWORD_FILE=/run/xcpc-secrets/password",
         "--env", "CONTAINER_TIMEZONE=" + cfg["timezone"],
         "--env", "DAEMON_ID=" + str(cpu),
-        "--env", "RUN_USER_UID_GID=" + str(uid_for(cpu)), IMAGE]
+        "--env", "RUN_USER_UID_GID=" + str(uid_for(cpu)), cfg.get("image_id", IMAGE),
+        # Keep the upstream image and entrypoint. Only load an optional private CA
+        # before executing the upstream command; no image build or custom daemon.
+        "/bin/bash", "-ec",
+        "if [ -f /run/xcpc-secrets/api-ca.crt ]; then "
+        "install -m 0644 /run/xcpc-secrets/api-ca.crt /usr/local/share/ca-certificates/xcpc-api.crt; "
+        "update-ca-certificates; fi; exec /scripts/start.sh"]
+
+
+def prepare_image(rt, cfg):
+    """Resolve latest once; retries must retain the already selected image."""
+    if cfg.get("image_ref") == IMAGE and cfg.get("image_id"):
+        image = inspect("image", cfg["image_id"])
+        if not image:
+            digest = cfg.get("image_digest")
+            if not digest:
+                raise InstallError("安装记录中的镜像已丢失；请从备份恢复后重试。")
+            rt.run(DOCKER + ["pull", "--platform", "linux/amd64", digest], timeout=3600)
+            image = inspect("image", cfg["image_id"])
+            if not image:
+                raise InstallError("恢复的镜像与安装记录不一致，停止。")
+    else:
+        # Legacy containers may still be judging. Migration requires retiring
+        # those containers first, while retaining their named data volumes.
+        if cfg.get("image_id") and any(inspect("container", container_name(cpu)) for cpu in cfg["cpus"]):
+            raise InstallError("检测到旧版自建镜像的容器。请按运维说明在维护窗口迁移；不会覆盖运行中的评测机。")
+        print("拉取官方 Docker 镜像 domjudge/judgehost:latest…", flush=True)
+        rt.run(DOCKER + ["pull", "--platform", "linux/amd64", IMAGE], timeout=3600)
+        image = inspect("image", IMAGE)
+        if not image:
+            raise InstallError("官方镜像拉取后不存在，停止。")
+    version = rt.run(DOCKER + ["run", "--rm", "--entrypoint", "/opt/domjudge/judgehost/bin/runguard",
+                               image["Id"], "--version"], capture=True)
+    match = re.search(r"DOMjudge version ([^\s]+)", version)
+    if not match:
+        raise InstallError("无法读取官方镜像中的评测程序版本。")
+    cfg.update(image_ref=IMAGE, image_id=image["Id"], judgehost_version=match[1],
+               image_digest=next((d for d in image.get("RepoDigests", [])
+                                  if d.startswith("domjudge/judgehost@sha256:")), cfg.get("image_digest")))
+    rt.save()
+    print(f"官方镜像：{IMAGE}；评测程序：{cfg['judgehost_version']}；DOMserver：9.0.1", flush=True)
 
 
 def fresh_heartbeat(value):
@@ -144,26 +183,7 @@ def install(rt, cfg, args, ask):
     if any("rootless" in option for option in info.get("SecurityOptions", [])):
         raise InstallError("judgehost 不支持本方案中的 rootless Docker。")
 
-    build_dir = mkdir(CACHE / "judgehost-image", 0o700)
-    recipe = hashlib.sha256(b"".join((root / name).read_bytes() for name in ["Dockerfile", "start.sh"])).hexdigest()
-    image = inspect("image", IMAGE)
-    if image and (image["Config"].get("Labels") or {}).get("org.xcpc.recipe") != recipe:
-        raise InstallError("已有同名但配方不同的镜像；本版不自动升级或覆盖它。")
-    if not image:
-        print("构建 Docker judgehost 9.0.1（官方基镜像 + 固定源码）…", flush=True)
-        for name in ["Dockerfile", "start.sh"]:
-            shutil.copyfile(root / name, build_dir / name)
-        shutil.copyfile(rt.artifact("domjudge"), build_dir / "domjudge-9.0.1.tar.gz")
-        rt.run(DOCKER + ["pull", "--platform", "linux/amd64", BASE_IMAGE], timeout=3600)
-        rt.run(DOCKER + ["build", "--platform", "linux/amd64", "--label", "org.xcpc.recipe=" + recipe,
-                        "--tag", IMAGE, build_dir], timeout=3600)
-        image = inspect("image", IMAGE)
-    version = rt.run(DOCKER + ["run", "--rm", "--entrypoint", "/opt/domjudge/judgehost/bin/runguard",
-                               IMAGE, "--version"], capture=True)
-    if "9.0.1/" not in version:
-        raise InstallError("容器内 runguard 不是 9.0.1，停止。")
-    cfg["image_id"] = image["Id"]
-    rt.save()
+    prepare_image(rt, cfg)
     mkdir(CONFIG, 0o700)
     mkdir(CONFIG / "secrets", 0o700)
     # Record a pending restart before replacing a file seen through a directory mount.
@@ -205,6 +225,7 @@ def install(rt, cfg, args, ask):
     link(CONFIG / "secrets/password", "/root/contest/judgehost/api-password")
     write("/root/contest/README.md",
           "# Docker 评测机\n\n配置：judgehost/config.json；密码：judgehost/api-password（root 专用）。\n"
+          "镜像：官方 domjudge/judgehost:latest；cgroup v2；实际版本和摘要见 config.json。\n"
           "检查：xcpc-check；日志：docker logs xcpc-judgehost-CPU编号。\n"
           "改密后需重启容器；维护前在主站禁用并等待当前评测完成。\n"
           "不要直接修改 CPU/主机名；不要删除 judgings 数据卷。\n"
@@ -212,6 +233,11 @@ def install(rt, cfg, args, ask):
 
 
 def check():
+    cgroups = subprocess.run(DOCKER + ["info", "--format", "{{.CgroupVersion}}"],
+                             capture_output=True, text=True, check=False)
+    if cgroups.returncode or cgroups.stdout.strip() != "2":
+        raise InstallError("本机 Docker 必须使用 cgroup v2。")
+    print("PASS Docker 引擎：cgroup v2", flush=True)
     cfg = json.loads((CONFIG / "config.json").read_text())
     password = (CONFIG / "secrets/password").read_text().strip()
     ca = CONFIG / "secrets/api-ca.crt"
@@ -227,7 +253,7 @@ def check():
                 or current["HostConfig"].get("CgroupnsMode") != "host"
                 or current["HostConfig"].get("CpusetCpus") != str(cpu)):
             raise InstallError(f"{name} 运行配置与记录不一致。")
-        print(f"PASS Docker：{name}，CPU {cpu}，镜像版本 9.0.1", flush=True)
+        print(f"PASS Docker：{name}，CPU {cpu}，评测程序 {cfg.get('judgehost_version', '未记录')}，镜像 {cfg.get('image_ref', '旧版')}", flush=True)
     def heartbeat():
         records = request(cfg["api_url"] + "judgehosts", cfg["api_user"], password, ca=ca)
         lookup = {r["hostname"]: r for r in records}

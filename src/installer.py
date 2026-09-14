@@ -151,13 +151,15 @@ def interactive_settings(args, previous=None):
         configuration(args, previous)
         print("沿用已有地址、主机名、CPU 和比赛配置；不会重新初始化已完成的数据库。", flush=True)
 
+    advanced = "高级设置：时区、发行包来源和比赛 ID" if args.role == "server" else "高级设置：时区、API 账号和证书"
     if ui.choose("其他设置", [("1", "使用默认设置 / 沿用已有设置"),
-                               ("2", "高级设置：时区、下载来源、API 账号或证书")], "1") == "2":
+                               ("2", advanced)], "1") == "2":
         if not previous:
             args.timezone = ui.field("时区", args.timezone or "Asia/Shanghai", ui.timezone)
-        source = ui.choose("应用发行包来源", [("1", "从官方地址下载"), ("2", "使用本机已有发行包目录")],
-                           "2" if args.artifact_dir else "1")
-        args.artifact_dir = (ui.field("发行包目录", args.artifact_dir, ui.directory) if source == "2" else None)
+        if args.role == "server":
+            source = ui.choose("应用发行包来源", [("1", "从官方地址下载"), ("2", "使用本机已有发行包目录")],
+                               "2" if args.artifact_dir else "1")
+            args.artifact_dir = (ui.field("发行包目录", args.artifact_dir, ui.directory) if source == "2" else None)
         if args.role == "judgehost":
             if not previous:
                 args.api_user = ui.field("DOMjudge API 账号", args.api_user or "judgehost", ui.username)
@@ -186,9 +188,13 @@ def show_summary(cfg, args):
         print(f"  应用：DOMjudge 9.0.1 + CDS + Live\n  主站：http://{cfg['host']}/", flush=True)
     else:
         names = ", ".join(cfg['hostname'] + '-' + str(cpu) for cpu in cfg['cpus'])
-        print(f"  应用：Docker judgehost 9.0.1\n  API：{cfg['api_url']}\n"
+        print(f"  应用：官方 Docker judgehost:latest\n  API：{cfg['api_url']}\n"
               f"  账号：{cfg['api_user']}（密码已隐藏）\n  评测实例：{names}", flush=True)
-    print(f"  时区：{cfg['timezone']}\n  发行包：{args.artifact_dir or '从官方地址下载'}", flush=True)
+    print(f"  时区：{cfg['timezone']}", flush=True)
+    if cfg["role"] == "server":
+        print(f"  发行包：{args.artifact_dir or '从官方地址下载'}", flush=True)
+    else:
+        print("  镜像：domjudge/judgehost:latest（首次拉取，重试沿用已记录镜像）", flush=True)
     print("不修改 GRUB/sysctl，不自动重启系统。", flush=True)
 
 
@@ -223,7 +229,7 @@ def main():
     parser.add_argument("--cpus")
     parser.add_argument("--timezone")
     parser.add_argument("--contest-id")
-    parser.add_argument("--artifact-dir", help="包含三个原版发行包的本机目录")
+    parser.add_argument("--artifact-dir", help="主站三个原版发行包的本机目录")
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--plan", action="store_true", help="只显示所选配置，不修改系统")
     parser.add_argument("--check", action="store_true", help="检查已安装服务")
@@ -253,7 +259,7 @@ def main():
             args.role = {"1": "server", "2": "judgehost"}[action]
             break
     release = platform_check()
-    if previous and previous.get("installer_version") not in {"1.0.0", VERSION}:
+    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", VERSION}:
         raise InstallError("已有其他版本安装状态；本入口不执行自动升级。")
     while True:
         cfg = configuration(args, previous) if args.yes else interactive_settings(args, previous)

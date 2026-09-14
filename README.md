@@ -63,7 +63,9 @@ API 密码来自 DOMjudge 的 judgehost 角色账号，不是 SSH、admin、CDS 
 
 选择 CPU `1,3` 会创建 `judge01-1` 和 `judge01-3` 两个评测实例，每个 CPU 一个 Docker 容器。CPU 从 0 编号，建议预留 CPU 0 给系统，避免同时使用同一物理核的超线程兄弟。
 
-镜像为 `xcpc-local/judgehost:9.0.1`，目标机自动构建。官方 9.0.1 标签在核验时不存在，因此使用固定摘要的官方 9.0.0 基镜像提供预建语言环境，再安装校验过的 **9.0.1 judgehost 源码**，并核对容器内实际版本。配方见 [Dockerfile](src/docker/Dockerfile)。
+直接拉取并运行官方镜像 **`domjudge/judgehost:latest`**，无需构建镜像，也无需下载 judgehost 源码。使用[官方镜像的启动方式](https://hub.docker.com/r/domjudge/judgehost)，API 密码通过文件提供。
+
+安装时显示并记录镜像实际版本和摘要；`latest` 是滚动标签，不等于固定的 9.0.1。2026-09-14 拉取到的评测程序为 9.0.0/release；主站仍安装 9.0.1。当前组合的验证结果见[测试记录](docs/TESTING.md)。重试沿用首次安装记录的镜像，不在比赛期间自动追随标签更新。
 
 ## 3. 一次部署 N 台 Docker 评测机
 
@@ -84,13 +86,13 @@ API 密码来自 DOMjudge 的 judgehost 角色账号，不是 SSH、admin、CDS 
 - 重试沿用已保存的地址、主机名、CPU 和比赛配置，跳过已完成阶段；比赛和用户资料仍在网页维护。
 - 选择 **5** 查看 Markdown 说明，阅读器中按 q 返回菜单。
 
-界面 1.1.0 兼容本工具 1.0.0 的安装状态；不会因此升级 DOMjudge、CDS、Live 或替换镜像配方。
+1.2.0 可读取本工具 1.0.0 / 1.1.0 的安装状态。主站可继续重试；已有自建镜像的评测机需按[迁移说明](docs/OPERATIONS.md#从旧版自建镜像迁移)在维护窗口切换，脚本不会直接覆盖旧容器。
 
 ## 高级设置和本地发行包
 
-向导默认使用 Asia/Shanghai 时区、官方发行包下载地址和 judgehost API 账号。高级菜单可填写时区、已有发行包目录、自定义 API 账号或私有 CA 公开证书；主站首次接入比赛 ID 可留空使用官方示例。
+向导默认使用 Asia/Shanghai 时区、官方发行包下载地址和 judgehost API 账号。高级菜单可填写时区、主站已有发行包目录、自定义 API 账号或私有 CA 公开证书；主站首次接入比赛 ID 可留空使用官方示例。
 
-本地发行包目录按角色准备以下原版文件，脚本仍会验证固定 SHA-256：
+主站的本地发行包目录准备以下原版文件，脚本仍会验证固定 SHA-256：
 
 ~~~text
 domjudge-9.0.1.tar.gz
@@ -98,7 +100,7 @@ wlp.CDS-2.6.1331.zip
 live-v3-3.5.0.jar
 ~~~
 
-主站需要三个包，单机 Docker 评测仅需要 DOMjudge 包。APT 和 Docker Hub 仍需可访问；批量向导默认在各目标机在线下载。摘要见 [src/common.py](src/common.py)。
+主站需要三个包；Docker 评测机不需要这些包，也不再询问发行包目录。评测机需要访问 APT 和 Docker Hub；批量部署同样直接拉取官方镜像。摘要见 [src/common.py](src/common.py)。
 
 ## 运行条件
 

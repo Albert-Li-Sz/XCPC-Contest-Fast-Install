@@ -1,6 +1,6 @@
 # DOMjudge、CDS、Live 部署与办赛运维
 
-本文对应本仓库 1.1.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
+本文对应本仓库 1.2.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
 
 ## 交互安装入口
 
@@ -14,7 +14,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Albert-Li-Sz/XCPC-Contest-Fa
 
 主站向导填写 IP/域名即可使用默认配置；评测机向导填写主站地址、唯一主机名、CPU 和隐藏输入的 API 密码。主站地址可直接输入 IP，系统补全 API 路径。输入错误会提示重填；最后的摘要页面可选择开始、重新填写或退出。高级设置可改时区、使用已有发行包、指定 API 用户或私有 CA 证书。
 
-再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.1.0 界面兼容本工具 1.0.0 的状态，不执行应用版本升级。
+再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.2.0 可读取本工具 1.0.0 / 1.1.0 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
 
 批量向导自动生成临时清单并询问 SSH 登录方式、密码及每台配置，无需手改 YAML；详情见[批量交互说明](../batch/README.md)。
 
@@ -102,7 +102,7 @@ cat /root/contest/initial-credentials.txt
 | --- | --- |
 | /opt/domjudge/domserver | DOMjudge 正式程序 |
 | /etc/xcpc-judgehost | 评测宿主机配置和私有凭据 |
-| 容器内 /opt/domjudge/judgehost | 9.0.1 评测程序 |
+| 容器内 /opt/domjudge/judgehost | 官方 latest 镜像自带的评测程序 |
 | /opt/icpctools/cds-2.6.1331 | CDS 官方发行程序 |
 | /opt/icpctools/cds | 指向上述版本的链接 |
 | /etc/icpc-cds | CDS XML、账号、环境、JVM 和 TLS |
@@ -193,34 +193,45 @@ PHP 服务按系统选择：Debian 13 通常是 php8.4-fpm，Ubuntu 24.04 通常
 
 ### 安装和镜像
 
-主站与评测机使用不同机器。目标为 Debian 13 / Ubuntu 24.04 amd64 的完整 VM 或物理机，内核 ≥5.19，启用 cgroup v2 并具有 memory/cpuset 控制器。脚本只检查条件，不编辑 GRUB/sysctl，不自动重启。
+主站与评测机使用不同机器。目标为 Debian 13 / Ubuntu 24.04 amd64 的完整 VM 或物理机，内核 ≥5.19，启用 cgroup v2 并具有 memory/cpuset 控制器。脚本只检查条件，不编辑 GRUB/sysctl，不自动重启。cgroup v1 会被拒绝；容器启动后的官方 create_cgroups 只配置当前 cgroup v2 层级的 memory/cpuset 控制器。若官方脚本的错误提示建议修改 GRUB，不要照搬，应排查 v2 控制器、挂载权限和 host cgroup namespace。
 
 菜单 2 自动安装发行版提供的 Docker Engine（若已有 Docker CLI，则要求其对应本机 rootful Engine 可用）。始终连接本地 `/var/run/docker.sock`，不使用用户的远程 Docker context。启用 Docker/chrony 的 systemd 开机启动。
 
-官方 `domjudge/judgehost:9.0.1` 标签在实现时不可拉取。本项目使用官方 9.0.0 镜像的固定摘要作为预建语言环境，再编译安装 DOMjudge 官方 9.0.1 judgehost：
+直接使用 [DOMjudge 官方 Docker 镜像](https://hub.docker.com/r/domjudge/judgehost) `domjudge/judgehost:latest`。首次安装自动执行以下拉取操作，不下载评测源码、不执行 docker build：
 
-~~~text
-domjudge/judgehost@sha256:4c01f07e49023bcadd92255786372ec4c5fb5335bec5c9366f07b1fdddb28567
-                  + 校验过的 domjudge-9.0.1.tar.gz
-                  -> xcpc-local/judgehost:9.0.1
+~~~bash
+docker pull domjudge/judgehost:latest
 ~~~
 
-9.0.0 是基镜像发行标签；**最终执行评测的 judgedaemon/runguard 是 9.0.1**。语言环境保留基镜像内容；例如核验时 g++ 为 Ubuntu 13.3.0。比赛语言配置必须与实际镜像中的编译器匹配。APT 依赖按发行版源安装，因此固定源码和基镜像不等于镜像输出每个字节永久相同。
+镜像提供 judgedaemon、runguard、chroot 和编译器环境，容器仍使用官方 `/scripts/start.sh` 启动评测。安装器把向导中的 `/api/` 地址转换成网站根地址，传入官方 `DOMSERVER_BASEURL`；官方启动脚本自行拼接 API 版本路径。密码通过 `JUDGEDAEMON_PASSWORD_FILE` 读取。仅在存在私有 CA 时，启动前将公开证书加入容器信任库，再执行官方启动脚本；没有生成或构建衍生镜像。
 
-第一次构建需要拉取较大镜像并编译；之后复跑校验本地镜像配方和实际版本。已有同名不同配方镜像、其他工具创建的同名容器/数据卷都会拒绝接管。本版不提供自动更新到 latest 或变更 CPU 数量的迁移流程。
+`latest` 会随官方发布变化。安装器显示 runguard 实际版本，把 `image_ref`、`image_id`、`image_digest`、`judgehost_version` 写入私有 config.json 与安装状态；创建容器时使用本次拉取解析出的镜像 ID，保证同一台机器的各 CPU 使用同一份镜像。重试使用该记录；镜像被清理时按记录摘要恢复，不重新选择 latest。摘要用于记录和恢复，不是代码中预设的版本锁定。
+
+2026-09-14 官方 latest 的实际评测程序为 **9.0.0/release**，摘要为 `sha256:4c01f07e49023bcadd92255786372ec4c5fb5335bec5c9366f07b1fdddb28567`。主站保持 **9.0.1**。当前组合的实际验证见 TESTING.md；未来 latest 的版本、语言环境及与主站的兼容性不能由本次结果保证，安装后仍需真实提交验收。批量部署由各目标机分别拉取，完成后核对各机摘要，确保比赛使用一致的环境。
+
+### 从旧版自建镜像迁移
+
+全新评测机直接用菜单 2 或 3。只有已用本工具 1.0.0 / 1.1.0 安装过自建镜像的评测机需要以下维护步骤：
+
+1. 在主站禁用该机器全部评测实例，等待当前评测完成。保存 `/etc/xcpc-judgehost`、`/var/lib/xcpc-installer` 和对应数据卷的备份。
+2. 在目标机确认要迁移的容器名。使用 `docker stop xcpc-judgehost-1`、`docker rm xcpc-judgehost-1` 停止并移除相应旧容器；按实际 CPU 对每个容器执行。**不要加 `-v`，不要删除 judgings/logs 卷，不要清空安装状态或 API 密码。**
+3. 运行新版一行入口，选择继续 / 重试已有评测机。地址、主机名、CPU、账号沿用旧记录；脚本拉取官方 latest 并使用原数据卷创建容器。只要旧容器仍存在，脚本就会停止迁移，不会覆盖它。
+4. 确认新容器已启动后在主站重新启用对应评测实例，再执行 `xcpc-check` 并提交测试程序。若安装末尾因实例仍被禁用而心跳验收失败，重新启用后再次选择继续 / 重试即可。
+
+脚本不在此次迁移中自动删除旧镜像或旧构建缓存，便于回退。需要回退时，在同一维护窗口停止并移除新容器、恢复备份的私有配置与安装状态，使用原版安装入口和保留的旧镜像恢复；不要恢复或初始化比赛数据库。
 
 ### 容器如何运行
 
 在向导中填写主机名 `judge01`、CPU `1,3`，会创建：
 
-| 宿主机容器名 | DOMjudge 注册名 | CPU | 沙箱 UID/GID |
+| 宿主机容器名 | DOMjudge 注册名 | CPU | 沙箱 UID |
 | --- | --- | --- | --- |
 | xcpc-judgehost-1 | judge01-1 | 1 | 62861 |
 | xcpc-judgehost-3 | judge01-3 | 3 | 62863 |
 
 编号从 0 开始，用 `lscpu -e=CPU,CORE,SOCKET,ONLINE` 检查实际拓扑。建议预留 CPU 0 给系统，避免同时使用同一物理核的超线程兄弟。不同物理机的 judge_hostname 必须唯一。
 
-容器为 privileged，使用 host 网络、host cgroup namespace 和可写 `/sys/fs/cgroup`；这是此判题沙箱方案运行所需的宿主机权限。容器不发布新网站端口。评测进程以 domjudge 运行，提交程序使用独立沙箱用户，UID/GID 为 `62860 + CPU编号`，不会让不同 CPU 容器复用同一个沙箱身份。Docker 重启策略为 `unless-stopped`。
+容器为 privileged，使用 host 网络、host cgroup namespace 和可写 `/sys/fs/cgroup`；这是此判题沙箱方案运行所需的宿主机权限。容器不发布新网站端口。评测进程以 domjudge 运行，提交程序使用独立沙箱用户，UID 为 `62860 + CPU编号`，不会让不同 CPU 容器复用同一个沙箱 UID；官方启动脚本创建对应 GID 的 domjudge-run 组，而沙箱用户的主组是 nogroup。Docker 重启策略为 `unless-stopped`。
 
 ### 配置与密码
 
@@ -232,7 +243,7 @@ domjudge/judgehost@sha256:4c01f07e49023bcadd92255786372ec4c5fb5335bec5c9366f07b1
     └── api-password -> /etc/xcpc-judgehost/secrets/password
 ~~~
 
-config.json 不包含 API 密码；用于记录不可随意修改的身份、CPU、时区、API 地址和镜像 ID。secrets 目录只允许 root 访问，以只读目录挂载进容器；密码不会作为 Docker 环境变量值或进程参数传递。私有 HTTPS API 可使用 高级设置中的“提供私有 CA 公开证书文件”，证书会被复制到正式 secrets 目录。不要用 TLS 私钥作为 CA 文件，也不要关闭 TLS 验证。
+config.json 不包含 API 密码；用于记录不可随意修改的身份、CPU、时区、API 地址、镜像标签/ID/摘要及评测程序实际版本。secrets 目录只允许 root 访问，以只读目录挂载进容器；安装器不会把实际密码放进 docker run 的环境变量值或参数；官方启动脚本在容器内部读取密码并生成 restapi.secret。私有 HTTPS API 可使用 高级设置中的“提供私有 CA 公开证书文件”，证书会被复制到正式 secrets 目录。不要用 TLS 私钥作为 CA 文件，也不要关闭 TLS 验证。
 
 改密操作：先在主站禁用该机器的评测实例、等待正在执行的提交完成，然后在 DOMjudge 更新 API 账号密码，编辑各宿主机 `api-password` 链接指向的正式文件，只写新密码并保持权限 600；重启该机全部受管理的容器。容器入口会重新生成内部 restapi.secret。共享 API 账号时，所有使用该账号的宿主机都要同步。
 
@@ -281,9 +292,9 @@ docker restart xcpc-judgehost-1
 
 由运维人员确认初始化是否完整、是否已有比赛数据后，按官方维护流程修复；如果只是可以丢弃的首次安装测试机，可回到安装前快照，再从空白状态部署。
 
-### Docker 拉取、构建或启动失败
+### Docker 拉取或启动失败
 
-先看私有安装日志及 `docker logs xcpc-judgehost-CPU编号`。网络失败可修复 Docker Hub/APT 连通性后使用原参数重跑；镜像未构建成功不会被当作已完成。最终镜像存在时会校验配方和 runguard 版本，不直接信任标签。
+先看私有安装日志及 `docker logs xcpc-judgehost-CPU编号`。网络失败可修复 Docker Hub/APT 连通性后再次选择继续 / 重试。只有拉取并读取实际版本成功后才记录镜像；后续使用已记录的镜像 ID，缺失时按记录摘要重新拉取。容器必须匹配原身份、CPU 和镜像记录才能继续使用。
 
 内核/cgroup 条件不满足时改用满足要求的完整 VM/物理机，不把 Docker Desktop 或受限容器当作正式评测宿主机。容器反复重启常见原因是 API 密码、证书、CPU/沙箱用户或 cgroup 权限；先读日志，不删除评测数据卷。
 
