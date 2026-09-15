@@ -8,7 +8,7 @@ Type=simple
 User=icpclive
 Group=icpclive
 WorkingDirectory=/var/lib/icpc-live
-ExecStart=/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Xms128m -Xmx512m -XX:MaxDirectMemorySize=128m -XX:+ExitOnOutOfMemoryError -Djava.awt.headless=true -Duser.timezone=@@TIMEZONE@@ -Djava.io.tmpdir=/var/lib/icpc-live/tmp -Djavax.net.ssl.trustStore=/etc/icpc-live/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit -jar /opt/icpc-live/current/live-v3.jar --config-directory=/var/lib/icpc-live/config --creds=/etc/icpc-live/creds.json --users-file=/var/lib/icpc-live/users.json --presets-dir=/var/lib/icpc-live/presets --media-dir=/var/lib/icpc-live/media --port=8081 --ktor-arg=-host=127.0.0.1 --disable-log-file --log-level=INFO
+ExecStart=@@JAVA_HOME@@/bin/java -Xms128m -Xmx512m -XX:MaxDirectMemorySize=128m -XX:+ExitOnOutOfMemoryError -Djava.awt.headless=true -Duser.timezone=@@TIMEZONE@@ -Djava.io.tmpdir=/var/lib/icpc-live/tmp -Djavax.net.ssl.trustStore=/etc/icpc-live/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit -jar /opt/icpc-live/current/live-v3.jar --config-directory=/var/lib/icpc-live/config --creds=/etc/icpc-live/creds.json --users-file=/var/lib/icpc-live/users.json --presets-dir=/var/lib/icpc-live/presets --media-dir=/var/lib/icpc-live/media --port=8081 --ktor-arg=-host=127.0.0.1 --disable-log-file --log-level=INFO
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=40

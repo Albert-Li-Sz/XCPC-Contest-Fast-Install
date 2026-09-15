@@ -23,8 +23,8 @@ HYBRID = V1 + '34 31 0:31 / /sys/fs/cgroup/unified rw - cgroup2 cgroup rw,nsdele
 
 
 class CgroupPreflight(unittest.TestCase):
-    def host(self, mounts, controllers, membership, container='none'):
-        files = {'/etc/os-release': 'ID=ubuntu\nVERSION_ID="24.04"\n',
+    def host(self, mounts, controllers, membership, container='none', distro='ubuntu', version='24.04'):
+        files = {'/etc/os-release': f'ID={distro}\nVERSION_ID="{version}"\n',
                  '/proc/self/mountinfo': mounts, '/proc/self/cgroup': membership,
                  '/sys/devices/system/cpu/online': '0-151',
                  '/sys/fs/cgroup/cgroup.controllers': controllers}
@@ -55,6 +55,11 @@ class CgroupPreflight(unittest.TestCase):
         report = self.host(V2, 'cpuset cpu io memory pids', '0::/\n')
         self.assertTrue(report['ok'])
         self.assertEqual(report['cgroup']['mode'], 'v2')
+
+    def test_distro_names_do_not_reject_valid_judgehost(self):
+        for distro, version in [('debian', '12'), ('ubuntu', '26.04'), ('fedora', '44'), ('custom', '')]:
+            report = self.host(V2, 'memory cpuset cpu pids', '0::/\n', distro=distro, version=version)
+            self.assertTrue(report['ok'], report['errors'])
 
     def test_legacy_mode_remains_rejected(self):
         report = self.host(V1, None, '1:memory:/\n2:cpuset:/\n')

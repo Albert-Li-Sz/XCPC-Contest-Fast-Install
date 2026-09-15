@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 STATE_DIR = Path("/var/lib/xcpc-installer")
 CACHE = Path("/var/cache/xcpc-installer")
 INSTALL_ROOT = Path("/opt/xcpc-installer")
@@ -37,6 +37,29 @@ RELEASES = {
 
 class InstallError(Exception):
     pass
+
+
+SERVER_SYSTEMS = {("debian", "12"), ("debian", "13"), ("ubuntu", "24.04"), ("ubuntu", "26.04")}
+
+
+def system_release():
+    release = {"ID": "linux", "VERSION_ID": "unknown"}
+    try:
+        lines = Path("/etc/os-release").read_text().splitlines()
+    except FileNotFoundError:
+        return release
+    for line in lines:
+        if "=" in line:
+            key, value = line.split("=", 1)
+            release[key] = value.strip('"')
+    return release
+
+
+def server_runtime(os_id, version):
+    if (os_id, version) not in SERVER_SYSTEMS:
+        raise InstallError("主站支持 Debian 12/13、Ubuntu 24.04/26.04。评测机不限制发行版版本。")
+    java = 17 if (os_id, version) == ("debian", "12") else 21
+    return {"java_major": java, "java_home": f"/usr/lib/jvm/java-{java}-openjdk-amd64"}
 
 
 def host(value):
@@ -210,7 +233,81 @@ class Runtime:
 
 def extract_tar(archive, destination):
     with tarfile.open(archive) as bundle:
-        bundle.extractall(destination, filter="data")
+        if hasattr(tarfile, "data_filter"):
+            try:
+                bundle.extractall(destination, filter="data")
+            except tarfile.FilterError as error:
+                raise InstallError("TAR 包含不安全路径或文件类型。") from error
+        else:
+            # Debian 12's Python 3.11.2 lacks extraction filters. Extract only
+            # regular files/directories, then create validated relative symlinks.
+            extract_tar_legacy(bundle, destination)
+
+
+def extract_tar_legacy(bundle, destination):
+    base = Path(destination).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    members = bundle.getmembers()
+    links = {Path(m.name) for m in members if m.issym()}
+    seen = set()
+    for member in members:
+        name = Path(member.name)
+        if name.is_absolute() or ".." in name.parts or name in seen:
+            raise InstallError("TAR 包含越界或重复路径。")
+        seen.add(name)
+        if any(parent in links for parent in name.parents):
+            raise InstallError("TAR 不允许通过符号链接目录写入文件。")
+        if not (member.isfile() or member.isdir() or member.issym()):
+            raise InstallError("TAR 包含不支持的特殊文件或硬链接。")
+        target = base / name
+        if not target.resolve().is_relative_to(base):
+            raise InstallError("TAR 目标路径越界。")
+        if member.issym():
+            linkname = Path(member.linkname)
+            if linkname.is_absolute() or not (target.parent / linkname).resolve().is_relative_to(base):
+                raise InstallError("TAR 符号链接目标越界。")
+    for member in members:
+        if member.issym():
+            continue
+        target = base / member.name
+        if target.is_symlink():
+            raise InstallError("TAR 不覆盖已有符号链接。")
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with bundle.extractfile(member) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            target.chmod(member.mode & 0o755)
+    for member in members:
+        if not member.issym():
+            continue
+        target = base / member.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink() and os.readlink(target) == member.linkname:
+            continue
+        if target.exists() or target.is_symlink():
+            raise InstallError("TAR 不覆盖已有链接目标。")
+        target.symlink_to(member.linkname)
+    # Preserve traversal permissions even under the entry's private umask 077.
+    for member in reversed(members):
+        if member.isdir():
+            (base / member.name).chmod((member.mode & 0o755) | 0o700)
+    # Recheck forward references once the complete symlink graph exists.
+    for name in links:
+        try:
+            safe = (base / name).resolve().is_relative_to(base)
+            # Python 3.13+ non-strict resolve can retain a symlink loop.
+            # stat detects ELOOP while dangling in-tree links remain allowed.
+            try:
+                (base / name).stat()
+            except FileNotFoundError:
+                pass
+        except (OSError, RuntimeError):
+            safe = False
+        if not safe:
+            (base / name).unlink()
+            raise InstallError("TAR 符号链接链越界或形成循环。")
 
 
 def extract_zip(archive, destination):

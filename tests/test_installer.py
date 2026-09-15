@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import gzip
 import importlib.util
 import io
 import json
@@ -78,7 +79,7 @@ class InstallationSafety(unittest.TestCase):
                 entry = tarfile.TarInfo("bad-link")
                 entry.type, entry.linkname = tarfile.SYMTYPE, "/etc/passwd"
                 bundle.addfile(entry)
-            with self.assertRaises(tarfile.FilterError):
+            with self.assertRaises(InstallError):
                 common.extract_tar(archive, Path(directory) / "target")
 
     def test_local_artifact_checksum_is_enforced(self):
@@ -113,6 +114,28 @@ class Bootstrap(unittest.TestCase):
         result = subprocess.run(["bash"], input=partial, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("准备入口依赖", result.stdout)
+
+    def invalid_payload(self, entry):
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode='w') as bundle:
+            bundle.addfile(entry)
+        payload = gzip.compress(data.getvalue(), mtime=0)
+        script = (ROOT / 'src/entry.sh').read_text().replace(
+            '@@PAYLOAD@@', base64.b64encode(payload).decode()).replace(
+            '@@PAYLOAD_SHA@@', hashlib.sha256(payload).hexdigest())
+        return subprocess.run(['bash'], input=script, text=True, capture_output=True)
+
+    def test_bootstrap_rejects_parent_paths_even_with_valid_checksum(self):
+        result = self.invalid_payload(tarfile.TarInfo('../escaped'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('非法文件或路径', result.stderr)
+
+    def test_bootstrap_rejects_symlinks_even_with_valid_checksum(self):
+        entry = tarfile.TarInfo('alias')
+        entry.type, entry.linkname = tarfile.SYMTYPE, '/tmp'
+        result = self.invalid_payload(entry)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('非法文件或路径', result.stderr)
 
     def test_nginx_templates_keep_sensitive_routes_protected(self):
         # Verify security intent at the template boundary, without mirroring every line.

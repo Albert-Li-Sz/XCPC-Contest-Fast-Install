@@ -6,7 +6,6 @@ import math
 from pathlib import Path
 import pwd
 import re
-import shutil
 import subprocess
 import time
 
@@ -185,18 +184,8 @@ def install(rt, cfg, args, ask):
     ):
         raise InstallError("主站已有同名评测进程；请使用新名称或先退役旧机器。")
 
-    def packages():
-        rt.run(["apt-get", "update"])
-        packages = ["chrony", "ca-certificates", "curl"]
-        if not shutil.which("docker"):
-            packages.append("docker.io")
-        rt.run(["apt-get", "-o", "Dpkg::Lock::Timeout=300", "install", "-y"] + packages)
-        if rt.state["os"] == "ubuntu":
-            rt.run(["apt-get", "remove", "-y", "apport"])
-        rt.run(["systemctl", "enable", "--now", "docker", "chrony"])
-        rt.run(["timedatectl", "set-timezone", cfg["timezone"]])
-        rt.run(["chronyc", "waitsync", "12", "0.5", "0", "5"], timeout=75)
-    rt.step("Docker Engine 与时间同步", packages)
+    from judge_dependencies import prepare
+    rt.step("Docker Engine 与时间同步", lambda: prepare(rt, cfg))
     info = json.loads(rt.run(DOCKER + ["info", "--format", "{{json .}}"], capture=True))
     if info.get("OSType") != "linux" or info.get("CgroupVersion") != "2":
         raise InstallError("Docker 必须是本机 Linux rootful 引擎，使用 cgroup v2。")

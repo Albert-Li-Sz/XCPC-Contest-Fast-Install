@@ -27,7 +27,7 @@ def check():
     if cfg["role"] == "judgehost":
         from docker_judge import check as check_docker
         service("docker")
-        service("chrony")
+        service(cfg.get("chrony_service", "chrony"))
         check_docker()
         clock_check()
         return

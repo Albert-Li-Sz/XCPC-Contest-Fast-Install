@@ -18,21 +18,17 @@ import ui
 from ui import ask
 
 from common import (VERSION, STATE_DIR, CACHE, INSTALL_ROOT, InstallError, Runtime,
-                    host, api_url, cpu_list, mkdir, write)
+                    host, api_url, cpu_list, mkdir, write, system_release, SERVER_SYSTEMS)
 
 
-def platform_check():
+def platform_check(role="server"):
     if os.geteuid() != 0:
         raise InstallError("请以 root 运行。")
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise InstallError("目标必须是 Linux amd64/x86_64。")
-    release = {}
-    for line in Path("/etc/os-release").read_text().splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            release[key] = value.strip('"')
-    if (release.get("ID"), release.get("VERSION_ID")) not in {("debian", "13"), ("ubuntu", "24.04")}:
-        raise InstallError("只支持 Debian 13 和 Ubuntu 24.04。")
+    release = system_release()
+    if role == "server" and (release["ID"], release["VERSION_ID"]) not in SERVER_SYSTEMS:
+        raise InstallError("主站支持 Debian 12/13 和 Ubuntu 24.04/26.04。")
     if not Path("/run/systemd/system").is_dir():
         raise InstallError("需要以 systemd 启动的完整 Linux 主机。")
     return release
@@ -258,8 +254,8 @@ def main():
                 return batch_main()
             args.role = {"1": "server", "2": "judgehost"}[action]
             break
-    release = platform_check()
-    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", "1.2.0", VERSION}:
+    release = platform_check(args.role)
+    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", "1.2.0", "1.2.1", VERSION}:
         raise InstallError("已有其他版本安装状态；本入口不执行自动升级。")
     while True:
         cfg = configuration(args, previous) if args.yes else interactive_settings(args, previous)
@@ -296,7 +292,7 @@ def main():
         write(log, "", 0o600)
         state = previous or {"installer_version": VERSION, "os": release["ID"],
                              "release": release["VERSION_ID"], "config": cfg, "done": []}
-        if (state["os"], state["release"]) != (release["ID"], release["VERSION_ID"]):
+        if cfg["role"] == "server" and (state["os"], state["release"]) != (release["ID"], release["VERSION_ID"]):
             raise InstallError("发行版已变化；请使用专门的升级流程。")
         rt = Runtime(state, log, args.artifact_dir)
         rt.save()

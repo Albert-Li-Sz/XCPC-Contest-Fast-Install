@@ -63,13 +63,15 @@ def cgroup_status(mountinfo, controllers):
 
 def check_host():
     errors = []
-    release = {}
-    for line in Path("/etc/os-release").read_text().splitlines():
+    release = {"ID": "linux", "VERSION_ID": "unknown"}
+    try:
+        lines = Path("/etc/os-release").read_text().splitlines()
+    except FileNotFoundError:
+        lines = []
+    for line in lines:
         if "=" in line:
             key, value = line.split("=", 1)
             release[key] = value.strip('"')
-    if (release.get("ID"), release.get("VERSION_ID")) not in {("debian", "13"), ("ubuntu", "24.04")}:
-        errors.append("仅支持 Debian 13 或 Ubuntu 24.04。")
     if os.geteuid() != 0:
         errors.append("需要以 root 运行。")
     if platform.machine() != "x86_64":

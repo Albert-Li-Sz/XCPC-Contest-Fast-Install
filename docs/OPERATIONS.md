@@ -1,6 +1,6 @@
 # DOMjudge、CDS、Live 部署与办赛运维
 
-本文对应本仓库 1.2.1 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
+本文对应本仓库 1.3.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
 
 ## 交互安装入口
 
@@ -14,7 +14,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Albert-Li-Sz/XCPC-Contest-Fa
 
 主站向导填写 IP/域名即可使用默认配置；评测机向导填写主站地址、唯一主机名、CPU 和隐藏输入的 API 密码。主站地址可直接输入 IP，系统补全 API 路径。输入错误会提示重填；最后的摘要页面可选择开始、重新填写或退出。高级设置可改时区、使用已有发行包、指定 API 用户或私有 CA 证书。
 
-再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.2.1 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
+再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.3.0 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 / 1.2.1 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
 
 批量向导自动生成临时清单并询问 SSH 登录方式、密码及每台配置，无需手改 YAML；详情见[批量交互说明](../batch/README.md)。
 
@@ -177,7 +177,18 @@ chronyc tracking
 xcpc-check
 ~~~
 
-PHP 服务按系统选择：Debian 13 通常是 php8.4-fpm，Ubuntu 24.04 通常是 php8.3-fpm。实际值记录在 /var/lib/xcpc-installer/state.json 中。
+主站支持以下系统，PHP 路径和服务名按安装后的实际版本自动生成：
+
+| 主站系统 | 默认 PHP-FPM | CDS / Live Java |
+| --- | --- | --- |
+| Debian 12 | php8.2-fpm | OpenJDK 17 |
+| Debian 13 | php8.4-fpm | OpenJDK 21 |
+| Ubuntu 24.04 | php8.3-fpm | OpenJDK 21 |
+| Ubuntu 26.04 | php8.5-fpm | OpenJDK 21 |
+
+Java 使用系统软件源的对应包，CDS 的 `server.env`、Live 的服务启动路径与导入证书的 keytool 保持一致。固定的 CDS 2.6.1331 / Live 3.5.0 可运行于 Java 17；Ubuntu 26.04 不使用其默认 Java 25。PHP、Java 版本和 Java 路径记录在 `/var/lib/xcpc-installer/state.json` 中。
+
+Debian 12 的 Python 3.11.2 尚无 TAR 解压过滤接口，安装器使用经过路径和符号链接校验的兼容解压实现；新版 Python 使用标准库 data filter。无需额外升级 Debian 12 的 Python。
 
 | 修改项 | 生效操作 |
 | --- | --- |
@@ -193,9 +204,21 @@ PHP 服务按系统选择：Debian 13 通常是 php8.4-fpm，Ubuntu 24.04 通常
 
 ### 安装和镜像
 
-主站与评测机使用不同机器。目标为 Debian 13 / Ubuntu 24.04 amd64 的完整 VM 或物理机，内核 ≥5.19，启用 cgroup v2 并具有 memory/cpuset 控制器。脚本只检查条件，不编辑 GRUB/sysctl，不自动重启。cgroup v1 会被拒绝；容器启动后的官方 create_cgroups 只配置当前 cgroup v2 层级的 memory/cpuset 控制器。若官方脚本的错误提示建议修改 GRUB，不要照搬，应排查 v2 控制器、挂载权限和 host cgroup namespace。
+主站与评测机使用不同机器。评测目标不限制 Linux 发行版名称和版本，须为 amd64、Python 3.11+、systemd 启动的完整 VM 或物理机，内核 ≥5.19，启用 cgroup v2 并具有 memory/cpuset 控制器。脚本只检查条件，不编辑 GRUB/sysctl，不自动重启。cgroup v1 会被拒绝；容器启动后的官方 create_cgroups 只配置当前 cgroup v2 层级的 memory/cpuset 控制器。若官方脚本的错误提示建议修改 GRUB，不要照搬，应排查 v2 控制器、挂载权限和 host cgroup namespace。
 
-菜单 2 自动安装发行版提供的 Docker Engine（若已有 Docker CLI，则要求其对应本机 rootful Engine 可用）。始终连接本地 `/var/run/docker.sock`，不使用用户的远程 Docker context。启用 Docker/chrony 的 systemd 开机启动。
+菜单 2 和菜单 3 使用相同的依赖检查：已安装的 Docker、chrony、curl 直接沿用，缺少的依赖通过当前包管理器安装。始终连接本地 `/var/run/docker.sock`，要求本机 rootful Docker Engine；已有 Docker CLI 但没有可用本机 Engine 时，会给出错误。
+
+| 包管理器 | 缺少 Docker 时的处理 |
+| --- | --- |
+| APT | 安装当前软件源的 docker.io |
+| DNF / YUM | 在当前软件源依次查找 docker-ce、moby-engine、docker；未找到时提示先配置 Docker 官方源或自行安装 |
+| Zypper | 安装当前软件源的 docker |
+| Pacman | 安装当前软件库的 docker，不自动刷新数据库或执行全系统升级 |
+| 其他 | 依赖已齐全则继续；否则提示手动安装缺少的依赖 |
+
+自动识别 `chrony.service` 或 `chronyd.service`，启用 Docker 与对应时间服务并检查同步。RPM/SUSE/Arch 等分支有离线行为测试，尚未逐发行版整机验证。若软件源没有兼容包，请按对应系统的安装方法准备依赖后重试；脚本不擅自添加第三方软件源。
+
+取消发行版白名单不取消沙箱运行条件：cgroup v1 / 混合模式、缺少控制器、rootless Docker、受限容器等仍会失败。安装器不会通过修改内核参数或自动重启来绕过这些检查。
 
 直接使用 [DOMjudge 官方 Docker 镜像](https://hub.docker.com/r/domjudge/judgehost) `domjudge/judgehost:latest`。首次安装自动执行以下拉取操作，不下载评测源码、不执行 docker build：
 
@@ -315,7 +338,7 @@ grep -RnsE 'cgroup|unified' /etc/default/grub /etc/default/grub.d 2>/dev/null
 
 ### Docker 拉取或启动失败
 
-先看私有安装日志及 `docker logs xcpc-judgehost-CPU编号`。网络失败可修复 Docker Hub/APT 连通性后再次选择继续 / 重试。只有拉取并读取实际版本成功后才记录镜像；后续使用已记录的镜像 ID，缺失时按记录摘要重新拉取。容器必须匹配原身份、CPU 和镜像记录才能继续使用。
+先看私有安装日志及 `docker logs xcpc-judgehost-CPU编号`。网络失败可修复 Docker Hub/系统软件源连通性后再次选择继续 / 重试。只有拉取并读取实际版本成功后才记录镜像；后续使用已记录的镜像 ID，缺失时按记录摘要重新拉取。容器必须匹配原身份、CPU 和镜像记录才能继续使用。
 
 内核/cgroup 条件不满足时改用满足要求的完整 VM/物理机，不把 Docker Desktop 或受限容器当作正式评测宿主机。容器反复重启常见原因是 API 密码、证书、CPU/沙箱用户或 cgroup 权限；先读日志，不删除评测数据卷。
 

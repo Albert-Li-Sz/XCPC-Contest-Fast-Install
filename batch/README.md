@@ -18,7 +18,7 @@ bash batch/start.sh
 
 控制端支持 Linux/macOS，需要 Python 3.11+ 与 OpenSSH 客户端。若已有 Ansible Core 2.19–2.21，会直接使用；否则确认部署后自动创建临时 Python 环境并安装兼容版本。Linux root 控制端可能安装 python3-venv；非 root 控制端应预先准备可用的 Python venv。
 
-目标支持 Debian 13 / Ubuntu 24.04 amd64，需要完整 systemd、rootful Docker 所需权限和 cgroup v2。先准备主站 judgehost API 账号；确保控制端能 SSH 连接目标，目标能连接主站 API、Docker Hub、APT 和 NTP。
+目标不限制 Linux 发行版名称和版本；需要 amd64、Python 3.11+、完整 systemd、rootful Docker 所需权限和 cgroup v2（memory/cpuset）。缺少 Python 时按目标机的 APT、DNF/YUM、Zypper 或 Pacman 安装；已有 Python 版本过旧时需先更新。先准备主站 judgehost API 账号；确保控制端能 SSH 连接目标，目标能连接主站 API、Docker Hub、系统软件源和 NTP。
 
 ## 向导步骤
 

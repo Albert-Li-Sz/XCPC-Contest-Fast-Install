@@ -13,12 +13,11 @@ from urllib.parse import quote
 import xml.etree.ElementTree as ET
 
 from common import (CACHE, STATE_DIR, INSTALL_ROOT, InstallError, mkdir, write, link,
-                    render, extract_tar, extract_zip, request, wait_for)
+                    render, extract_tar, extract_zip, request, wait_for, server_runtime)
 
 DOM = Path("/opt/domjudge/domserver")
 CDS = Path("/etc/icpc-cds")
 LIVE = Path("/etc/icpc-live")
-JAVA = Path("/usr/lib/jvm/java-21-openjdk-amd64")
 
 
 def new_user(rt, name, home="/nonexistent"):
@@ -58,6 +57,10 @@ def fresh_server_check():
 
 
 def install(rt, cfg):
+    runtime = server_runtime(rt.state["os"], rt.state["release"])
+    cfg.setdefault("java_major", runtime["java_major"])
+    cfg.setdefault("java_home", runtime["java_home"])
+    java_home = Path(cfg["java_home"])
     private_path = STATE_DIR / "secrets.json"
     if private_path.exists():
         private = json.loads(private_path.read_text())
@@ -74,8 +77,8 @@ def install(rt, cfg):
                 "curl", "ca-certificates", "mariadb-server", "nginx", "apache2-utils", "chrony",
                 "php-cli", "php-fpm", "php-gd", "php-intl", "php-mbstring", "php-mysql",
                 "php-curl", "php-xml", "php-zip", "php-bcmath", "composer", "python3-yaml", "python3-requests",
-                "openjdk-21-jre-headless", "openssl", "iproute2"])
-        # Distros choose PHP 8.3 (Ubuntu 24.04) or 8.4 (Debian 13).
+                f"openjdk-{cfg['java_major']}-jre-headless", "openssl", "iproute2"])
+        # Use the installed distro PHP; service/config paths must follow its actual version.
         cfg["php"] = rt.run(["php", "-r", 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;'], capture=True)
         rt.save()
         rt.run(["timedatectl", "set-timezone", cfg["timezone"]])
@@ -218,7 +221,7 @@ def install(rt, cfg):
         for filename in ["cds.crt", "cds.p12"]:
             os.chown(CDS / "tls" / filename, 0, cds_gid)
             os.chmod(CDS / "tls" / filename, 0o640)
-        write(CDS / "server.env", f"JAVA_HOME={JAVA}\nCDS_KEYSTORE_PASSWORD={private['keystore']}\n"
+        write(CDS / "server.env", f"JAVA_HOME={java_home}\nCDS_KEYSTORE_PASSWORD={private['keystore']}\n"
               f"ICPC_TOOLS_IP={cfg['host']}\n", group="cds")
         write(CDS / "server.xml", render("cds-server.xml"), group="cds")
         write(CDS / "jvm.options", render("cds-jvm.options", TIMEZONE=cfg["timezone"]), group="cds")
@@ -273,13 +276,13 @@ def install(rt, cfg):
                                           "confirmed": True}]) + "\n", 0o600,
                   user="icpclive", group="icpclive")
         shutil.copyfile("/etc/ssl/certs/java/cacerts", LIVE / "truststore.jks")
-        rt.run([JAVA / "bin/keytool", "-importcert", "-noprompt", "-alias", "xcpc-local-cds",
+        rt.run([java_home / "bin/keytool", "-importcert", "-noprompt", "-alias", "xcpc-local-cds",
                 "-file", CDS / "tls/cds.crt", "-keystore", LIVE / "truststore.jks",
                 "-storepass", "changeit"])
         os.chown(LIVE / "truststore.jks", 0, grp.getgrnam("icpclive").gr_gid)
         (LIVE / "truststore.jks").chmod(0o640)
         write("/etc/systemd/system/icpc-live.service",
-              render("icpc-live.service", TIMEZONE=cfg["timezone"]), 0o644)
+              render("icpc-live.service", TIMEZONE=cfg["timezone"], JAVA_HOME=java_home), 0o644)
         write("/etc/nginx/sites-available/icpc-live",
               render("live-nginx.conf", HOST=cfg["host"]), 0o644)
         link("/etc/nginx/sites-available/icpc-live", "/etc/nginx/sites-enabled/icpc-live")
