@@ -259,7 +259,7 @@ def main():
             args.role = {"1": "server", "2": "judgehost"}[action]
             break
     release = platform_check()
-    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", VERSION}:
+    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", "1.2.0", VERSION}:
         raise InstallError("已有其他版本安装状态；本入口不执行自动升级。")
     while True:
         cfg = configuration(args, previous) if args.yes else interactive_settings(args, previous)

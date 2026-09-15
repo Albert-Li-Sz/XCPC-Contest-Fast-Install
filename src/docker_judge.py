@@ -118,9 +118,29 @@ def fresh_heartbeat(value):
         return False
 
 
+def preflight(rt):
+    result = subprocess.run(["python3", str(Path(__file__).parent / "docker/preflight.py")],
+                            capture_output=True, text=True, timeout=30, check=False)
+    with rt.log.open("a") as log:
+        log.write(result.stdout + result.stderr)
+    try:
+        report = json.loads(result.stdout)
+        errors = report["errors"]
+        if not isinstance(errors, list) or not all(isinstance(e, str) for e in errors):
+            raise ValueError("Malformed preflight errors")
+        ok = report["ok"] is True
+    except (ValueError, KeyError, TypeError):
+        raise InstallError(f"环境检查未返回有效诊断；查看私有日志 {rt.log}") from None
+    if result.returncode or not ok or errors:
+        detail = "\n".join("  - " + error for error in errors) or "  - 环境检查进程异常退出。"
+        raise InstallError("评测机环境检查未通过：\n" + detail +
+                           "\n安装已停止，本次尚未执行 Docker 安装或创建评测容器；不会修改 GRUB/sysctl 或自动重启。"
+                           "\n请检查：findmnt -R /sys/fs/cgroup -o TARGET,FSTYPE,OPTIONS"
+                           "\n完整诊断：" + str(rt.log))
+
+
 def install(rt, cfg, args, ask):
-    root = Path(__file__).parent / "docker"
-    rt.run(["python3", root / "preflight.py"])
+    preflight(rt)
     online_raw = Path("/sys/devices/system/cpu/online").read_text().strip()
     online = set()
     for segment in online_raw.split(","):

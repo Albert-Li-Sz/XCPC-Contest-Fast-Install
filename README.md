@@ -86,7 +86,7 @@ API 密码来自 DOMjudge 的 judgehost 角色账号，不是 SSH、admin、CDS 
 - 重试沿用已保存的地址、主机名、CPU 和比赛配置，跳过已完成阶段；比赛和用户资料仍在网页维护。
 - 选择 **5** 查看 Markdown 说明，阅读器中按 q 返回菜单。
 
-1.2.0 可读取本工具 1.0.0 / 1.1.0 的安装状态。主站可继续重试；已有自建镜像的评测机需按[迁移说明](docs/OPERATIONS.md#从旧版自建镜像迁移)在维护窗口切换，脚本不会直接覆盖旧容器。
+1.2.1 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 的安装状态。主站可继续重试；已有自建镜像的评测机需按[迁移说明](docs/OPERATIONS.md#从旧版自建镜像迁移)在维护窗口切换，脚本不会直接覆盖旧容器。
 
 ## 高级设置和本地发行包
 
@@ -113,7 +113,7 @@ live-v3-3.5.0.jar
 | 批量控制端 | Linux/macOS，Python 3.11+、OpenSSH；无合适 Ansible 时需要联网准备临时环境 |
 | 网络 | APT、官方发行包、Docker Hub、DNS、NTP；控制端可 SSH 连接评测机，评测机可访问主站 API |
 
-**不修改 GRUB/sysctl，不自动重启。**Docker 评测容器使用 privileged、host cgroup namespace 和可写 cgroup 挂载，容器内运行官方 cgroup 初始化工具。
+**不修改 GRUB/sysctl，不自动重启。** cgroup v1 或 v1/v2 混合模式不会被当成统一 v2；系统版本或内核较新不代表当前已启用 v2。诊断与维护步骤见[混合模式排查](docs/OPERATIONS.md#cgroup-v1v2-混合模式导致预检查失败)。Docker 评测容器使用 privileged、host cgroup namespace 和可写 cgroup 挂载，容器内运行官方 cgroup 初始化工具。
 
 入口内含安装代码、向导、模板和说明，不会重新拉取其他版本的零散脚本。支持进程替换；下载截断或内嵌包校验失败时不会开始安装。入口版本可通过把 URL 中 `main` 替换为审核过的提交 SHA 固定。
 

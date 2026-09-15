@@ -1,6 +1,6 @@
 # DOMjudge、CDS、Live 部署与办赛运维
 
-本文对应本仓库 1.2.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
+本文对应本仓库 1.2.1 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
 
 ## 交互安装入口
 
@@ -14,7 +14,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Albert-Li-Sz/XCPC-Contest-Fa
 
 主站向导填写 IP/域名即可使用默认配置；评测机向导填写主站地址、唯一主机名、CPU 和隐藏输入的 API 密码。主站地址可直接输入 IP，系统补全 API 路径。输入错误会提示重填；最后的摘要页面可选择开始、重新填写或退出。高级设置可改时区、使用已有发行包、指定 API 用户或私有 CA 证书。
 
-再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.2.0 可读取本工具 1.0.0 / 1.1.0 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
+再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.2.1 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
 
 批量向导自动生成临时清单并询问 SSH 登录方式、密码及每台配置，无需手改 YAML；详情见[批量交互说明](../batch/README.md)。
 
@@ -291,6 +291,27 @@ docker restart xcpc-judgehost-1
 ~~~
 
 由运维人员确认初始化是否完整、是否已有比赛数据后，按官方维护流程修复；如果只是可以丢弃的首次安装测试机，可回到安装前快照，再从空白状态部署。
+
+### cgroup v1/v2 混合模式导致预检查失败
+
+Ubuntu 24.04 和 Linux 6.8 支持 cgroup v2，但机器可能沿用旧的启动配置。若 `/sys/fs/cgroup` 是 tmpfs、`unified` 子目录是 cgroup2，而 memory/cpuset 子目录仍是 cgroup，说明当前为混合模式。如果 `docker info` 同时显示 `Cgroup Version: 1`，Docker 仍在使用 v1。仅存在 unified 子目录不能满足本工具对统一 v2 的要求。
+
+以下命令只读取状态：
+
+~~~bash
+findmnt -R /sys/fs/cgroup -o TARGET,FSTYPE,OPTIONS
+cat /proc/self/cgroup
+systemd-detect-virt
+docker info --format 'cgroup={{.CgroupVersion}} driver={{.CgroupDriver}}'
+cat /proc/cmdline
+grep -RnsE 'cgroup|unified' /etc/default/grub /etc/default/grub.d 2>/dev/null
+~~~
+
+本工具 1.2.0 及更早版本还会把任意 `:/` 结尾的进程 cgroup 路径当成容器证据，这一判断不正确。例如物理机的 v1 cpuset 路径也可能是 `/`。1.2.1 已移除该误判，使用挂载信息区分 v1、混合模式与统一 v2；容器环境通过明确的容器检测识别。真实的 v1 / 混合模式限制仍然保留，具体错误现在直接显示在安装界面，完整诊断继续写入日志。
+
+[Docker 官方说明](https://docs.docker.com/engine/containers/runmetrics/#changing-cgroup-version)：切换 cgroup 版本需要整机重启。先核对 `/proc/cmdline` 和实际生效的启动配置，寻找强制旧模式的设置（例如 `systemd.unified_cgroup_hierarchy=0`），再在维护窗口处理。不要直接覆盖整行 GRUB 配置，也不要为了绕过检查而在线卸载 memory/cpuset 或重新挂载 cgroup；现有 Docker/GPU 任务可能正在使用这些控制器。
+
+安装器不会自动执行这项系统迁移。若当前不能修改启动模式或重启，请使用另一台已启用统一 v2 的独立评测主机。完成系统维护后，确认 `/sys/fs/cgroup` 本身为 cgroup2、根目录的 cgroup.controllers 包含 memory 和 cpuset、Docker 报告 cgroup 版本 2，再运行同一入口并选择继续 / 重试。预检查失败发生在 Docker 安装、镜像拉取和评测容器创建之前，只留下安装状态与日志，无需删除数据库、Docker 数据或整份状态文件来重试。
 
 ### Docker 拉取或启动失败
 

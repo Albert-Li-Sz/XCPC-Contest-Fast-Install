@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 STATE_DIR = Path("/var/lib/xcpc-installer")
 CACHE = Path("/var/cache/xcpc-installer")
 INSTALL_ROOT = Path("/opt/xcpc-installer")

@@ -7,7 +7,7 @@ xcpc_main() {
         case "$arg" in
             -h|--help)
                 cat <<'HELP'
-XCPC 快速部署 1.2.0
+XCPC 快速部署 1.2.1
 直接运行即可进入中文交互菜单，无需追加安装参数：
   bash main.sh
 
@@ -26,7 +26,7 @@ XCPC 快速部署 1.2.0
 
 HELP
                 return 0 ;;
-            --version) echo 'XCPC Fast Install 1.2.0'; return 0 ;;
+            --version) echo 'XCPC Fast Install 1.2.1'; return 0 ;;
         esac
     done
     if ! command -v python3 >/dev/null; then
