@@ -86,7 +86,7 @@ API 密码来自 DOMjudge 的 judgehost 角色账号，不是 SSH、admin、CDS 
 - 重试沿用已保存的地址、主机名、CPU 和比赛配置，跳过已完成阶段；比赛和用户资料仍在网页维护。
 - 选择 **5** 查看 Markdown 说明，阅读器中按 q 返回菜单。
 
-1.3.0 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 / 1.2.1 的安装状态。主站可继续重试；已有自建镜像的评测机需按[迁移说明](docs/OPERATIONS.md#从旧版自建镜像迁移)在维护窗口切换，脚本不会直接覆盖旧容器。
+1.4.0 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 / 1.2.1 / 1.3.0 的安装状态。主站可继续重试；已有自建镜像的评测机需按[迁移说明](docs/OPERATIONS.md#从旧版自建镜像迁移)在维护窗口切换，脚本不会直接覆盖旧容器。
 
 ## 高级设置和本地发行包
 
@@ -109,12 +109,14 @@ live-v3-3.5.0.jar
 | 主站系统 | Debian 12/13、Ubuntu 24.04/26.04；amd64/x86_64、root、systemd |
 | 评测机系统 | 不限制 Linux 发行版名称和版本；amd64/x86_64、root、systemd、Python 3.11+ |
 | 主站参考资源 | 8 GiB RAM、4 vCPU、20 GiB 磁盘；至少约 4 GiB RAM、根分区 6 GiB 可用空间 |
-| 评测宿主机 | 完整 VM 或物理机，内核 ≥5.19、cgroup v2、memory/cpuset 控制器 |
+| 评测宿主机 | 完整 VM 或物理机；自动识别 cgroup v1/v2 并校验所需控制器；v2 要求内核 ≥5.19 |
 | Docker | 本机 rootful Engine；不支持 Docker Desktop、rootless 或受限 LXC 作为正式目标 |
 | 批量控制端 | Linux/macOS，Python 3.11+、OpenSSH；无合适 Ansible 时需要联网准备临时环境 |
 | 网络 | 系统软件源、官方发行包、Docker Hub、DNS、NTP；控制端可 SSH 连接评测机，评测机可访问主站 API |
 
-**不修改 GRUB/sysctl，不自动重启。** cgroup v1 或 v1/v2 混合模式不会被当成统一 v2；系统版本或内核较新不代表当前已启用 v2。诊断与维护步骤见[混合模式排查](docs/OPERATIONS.md#cgroup-v1v2-混合模式导致预检查失败)。Docker 评测容器使用 privileged、host cgroup namespace 和可写 cgroup 挂载，容器内运行官方 cgroup 初始化工具。
+**cgroup 自动识别，无需在菜单中选择，也不修改 GRUB/sysctl 或自动重启。** `/sys/fs/cgroup` 本身是 cgroup2 时使用 v2；传统 v1 或根目录为 tmpfs 的混合模式，在 v1 控制器齐全时使用 v1。每台目标机独立识别并与本机 Docker 报告交叉核对；不会把系统在线转换为另一种模式。Docker 容器继续使用 privileged、host cgroup namespace 和可写 cgroup 挂载，由官方脚本初始化对应层级。详见[cgroup 自动识别与排查](docs/OPERATIONS.md#cgroup-自动识别与排查)。
+
+v1 需要可写的 memory、cpuset、cpu、cpuacct 控制器及 swap accounting；支持 cpu/cpuacct 合并挂载和标准软链接。v2 需要可写根层级及 memory/cpuset 控制器，内核至少 5.19。所需功能缺失时直接提示具体原因；不会因为系统使用 v1 就拒绝安装。
 
 入口内含安装代码、向导、模板和说明，不会重新拉取其他版本的零散脚本。支持进程替换；下载截断或内嵌包校验失败时不会开始安装。入口版本可通过把 URL 中 `main` 替换为审核过的提交 SHA 固定。
 

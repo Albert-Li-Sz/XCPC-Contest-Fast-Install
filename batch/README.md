@@ -18,7 +18,7 @@ bash batch/start.sh
 
 控制端支持 Linux/macOS，需要 Python 3.11+ 与 OpenSSH 客户端。若已有 Ansible Core 2.19–2.21，会直接使用；否则确认部署后自动创建临时 Python 环境并安装兼容版本。Linux root 控制端可能安装 python3-venv；非 root 控制端应预先准备可用的 Python venv。
 
-目标不限制 Linux 发行版名称和版本；需要 amd64、Python 3.11+、完整 systemd、rootful Docker 所需权限和 cgroup v2（memory/cpuset）。缺少 Python 时按目标机的 APT、DNF/YUM、Zypper 或 Pacman 安装；已有 Python 版本过旧时需先更新。先准备主站 judgehost API 账号；确保控制端能 SSH 连接目标，目标能连接主站 API、Docker Hub、系统软件源和 NTP。
+目标不限制 Linux 发行版名称和版本；需要 amd64、Python 3.11+、完整 systemd、rootful Docker 所需权限和可用的 cgroup v1 或 v2 控制器。缺少 Python 时按目标机的 APT、DNF/YUM、Zypper 或 Pacman 安装；已有 Python 版本过旧时需先更新。先准备主站 judgehost API 账号；确保控制端能 SSH 连接目标，目标能连接主站 API、Docker Hub、系统软件源和 NTP。
 
 ## 向导步骤
 
@@ -38,7 +38,7 @@ bash batch/start.sh
 
 向导分发当前运行的**同一份自包含 main.sh**。即使使用进程替换，也能从已校验的内嵌包重建这份入口，不会在批量部署过程中改为下载另一个 main 版本。
 
-每台目标机调用相同 Docker 安装实现，一颗选定 CPU 对应一个容器。Ansible 同步等待各机安装结果，目标端使用安装锁。首次拉取官方 `domjudge/judgehost:latest` 镜像可能较久，无需编译评测机源码，失败时看逐机汇总及目标 `/var/log/xcpc-installer/` 中的私有日志。
+每台目标机调用相同 Docker 安装实现，一颗选定 CPU 对应一个容器。cgroup 模式按每台宿主机自动检测，同一轮可以同时部署 v1 和 v2 主机，不需要手动填写版本。Ansible 同步等待各机安装结果，目标端使用安装锁。首次拉取官方 `domjudge/judgehost:latest` 镜像可能较久，无需编译评测机源码，失败时看逐机汇总及目标 `/var/log/xcpc-installer/` 中的私有日志。
 
 首次 SSH 主机密钥需要核对指纹。已有的用户 known_hosts 记录会沿用；本次新确认的密钥保存在本次临时文件中，不会自动写入用户全局 known_hosts。再次连接仍未知的主机时会再次询问。
 

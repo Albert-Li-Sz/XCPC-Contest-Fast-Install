@@ -1,5 +1,7 @@
 import json
+import io
 from pathlib import Path
+from contextlib import redirect_stdout
 import subprocess
 import sys
 import unittest
@@ -39,10 +41,46 @@ class DockerJudging(unittest.TestCase):
         self.assertTrue(any('src=xcpc-judgehost-3-judgings,' in a for a in args))
         self.assertEqual(args[:3], ['docker', '--host', 'unix:///var/run/docker.sock'])
 
-    def test_health_rejects_cgroup_v1_before_reading_credentials(self):
-        with patch.object(judge.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '1', '')):
-            with self.assertRaisesRegex(judge.InstallError, 'cgroup v2'):
+    def test_engine_must_match_detected_host_version(self):
+        for version in ['1', '2']:
+            selected = {'version': version, 'mode': 'v' + version}
+            info = {'OSType': 'linux', 'CgroupVersion': version, 'SecurityOptions': []}
+            self.assertEqual(judge.validate_engine(info, selected), version)
+            with self.assertRaisesRegex(judge.InstallError, '宿主机挂载'):
+                judge.validate_engine({**info, 'CgroupVersion': '2' if version == '1' else '1'}, selected)
+            with self.assertRaisesRegex(judge.InstallError, 'rootful'):
+                judge.validate_engine({**info, 'SecurityOptions': ['name=rootless']}, selected)
+
+    def test_health_accepts_both_cgroup_versions_and_checks_container(self):
+        self.cfg.update(image_id='sha256:test')
+        for version in ['1', '2']:
+            selected = {'version': version, 'mode': 'hybrid' if version == '1' else 'v2'}
+            def run(args, **kwargs):
+                value = (json.dumps({'OSType': 'linux', 'CgroupVersion': version})
+                         if 'info' in args else version)
+                return subprocess.CompletedProcess(args, 0, value, '')
+            def current(kind, name):
+                return {'Image': 'sha256:test', 'State': {'Running': True},
+                        'HostConfig': {'RestartPolicy': {'Name': 'unless-stopped'}, 'Privileged': True,
+                                       'CgroupnsMode': 'host', 'CpusetCpus': name.rsplit('-', 1)[1]}}
+            with patch.object(judge.cgroups, 'detect', return_value=(selected, [])), \
+                 patch.object(judge.platform, 'release', return_value='6.8.0'), \
+                 patch.object(judge.subprocess, 'run', side_effect=run) as process, \
+                 patch.object(Path, 'read_text', lambda p: json.dumps(self.cfg) if p.name == 'config.json' else 'test-only-password'), \
+                 patch.object(Path, 'exists', return_value=False), patch.object(judge, 'inspect', side_effect=current), \
+                 patch.object(judge.time, 'time', return_value=1000), \
+                 patch.object(judge, 'request', return_value=[{'hostname': f'judge01-{cpu}', 'enabled': True, 'polltime': 1000} for cpu in [1, 3]]), \
+                 redirect_stdout(io.StringIO()) as output:
                 judge.check()
+            self.assertIn('cgroup v' + version, output.getvalue())
+            self.assertNotIn('test-only-password', output.getvalue())
+            self.assertEqual(sum('exec' in call.args[0] for call in process.call_args_list), 2)
+
+    def test_health_rejects_wrong_container_mounts(self):
+        for code, output in [(0, '2'), (1, '')]:
+            with patch.object(judge.subprocess, 'run', return_value=subprocess.CompletedProcess([], code, output, '')):
+                with self.assertRaisesRegex(judge.InstallError, '容器内'):
+                    judge.check_container_cgroup('test-container', '1')
 
     def test_configuration_identity_changes_when_api_changes(self):
         original = judge.spec_hash(self.cfg, 1)

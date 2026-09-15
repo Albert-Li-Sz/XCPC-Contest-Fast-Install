@@ -1,6 +1,6 @@
 # DOMjudge、CDS、Live 部署与办赛运维
 
-本文对应本仓库 1.3.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
+本文对应本仓库 1.4.0 安装器：DOMjudge 9.0.1、CDS 2.6.1331、Live 3.5.0。示例 IP 192.0.2.10 必须替换为实际主站地址。
 
 ## 交互安装入口
 
@@ -14,7 +14,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Albert-Li-Sz/XCPC-Contest-Fa
 
 主站向导填写 IP/域名即可使用默认配置；评测机向导填写主站地址、唯一主机名、CPU 和隐藏输入的 API 密码。主站地址可直接输入 IP，系统补全 API 路径。输入错误会提示重填；最后的摘要页面可选择开始、重新填写或退出。高级设置可改时区、使用已有发行包、指定 API 用户或私有 CA 证书。
 
-再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.3.0 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 / 1.2.1 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
+再次运行时会识别已有安装，对应菜单改为继续/重试，沿用原有部署身份。1.4.0 可读取本工具 1.0.0 / 1.1.0 / 1.2.0 / 1.2.1 / 1.3.0 的状态；主站可继续重试，旧版评测机的镜像切换见第 7 节。
 
 批量向导自动生成临时清单并询问 SSH 登录方式、密码及每台配置，无需手改 YAML；详情见[批量交互说明](../batch/README.md)。
 
@@ -204,7 +204,9 @@ Debian 12 的 Python 3.11.2 尚无 TAR 解压过滤接口，安装器使用经�
 
 ### 安装和镜像
 
-主站与评测机使用不同机器。评测目标不限制 Linux 发行版名称和版本，须为 amd64、Python 3.11+、systemd 启动的完整 VM 或物理机，内核 ≥5.19，启用 cgroup v2 并具有 memory/cpuset 控制器。脚本只检查条件，不编辑 GRUB/sysctl，不自动重启。cgroup v1 会被拒绝；容器启动后的官方 create_cgroups 只配置当前 cgroup v2 层级的 memory/cpuset 控制器。若官方脚本的错误提示建议修改 GRUB，不要照搬，应排查 v2 控制器、挂载权限和 host cgroup namespace。
+主站与评测机使用不同机器。评测目标不限制 Linux 发行版名称和版本，须为 amd64、Python 3.11+、systemd 启动的完整 VM 或物理机。cgroup v1/v2 根据当前挂载自动识别，无需在菜单中选择；v2 仍要求内核 ≥5.19，v1 不套用这一门槛（DOMjudge 要求 ≥3.2，另须满足所用 Docker Engine 的内核要求）。官方镜像的 create_cgroups 与 runguard 均包含 v1/v2 分支，安装器按同一根挂载规则选择。
+
+安装器只检测当前模式，随后与本机 Docker 的 CgroupVersion 核对。不会修改 GRUB/sysctl、重挂载宿主机层级或自动重启；官方镜像启动时创建的评测 cgroup 属于当前已有模式。
 
 菜单 2 和菜单 3 使用相同的依赖检查：已安装的 Docker、chrony、curl 直接沿用，缺少的依赖通过当前包管理器安装。始终连接本地 `/var/run/docker.sock`，要求本机 rootful Docker Engine；已有 Docker CLI 但没有可用本机 Engine 时，会给出错误。
 
@@ -218,7 +220,7 @@ Debian 12 的 Python 3.11.2 尚无 TAR 解压过滤接口，安装器使用经�
 
 自动识别 `chrony.service` 或 `chronyd.service`，启用 Docker 与对应时间服务并检查同步。RPM/SUSE/Arch 等分支有离线行为测试，尚未逐发行版整机验证。若软件源没有兼容包，请按对应系统的安装方法准备依赖后重试；脚本不擅自添加第三方软件源。
 
-取消发行版白名单不取消沙箱运行条件：cgroup v1 / 混合模式、缺少控制器、rootless Docker、受限容器等仍会失败。安装器不会通过修改内核参数或自动重启来绕过这些检查。
+取消发行版白名单不取消沙箱运行条件：缺少所需控制器、只读挂载、rootless Docker、受限容器或 Docker 与宿主机模式不一致时会失败。完整的 v1 和具备所需 v1 控制器的混合模式可以通过。
 
 直接使用 [DOMjudge 官方 Docker 镜像](https://hub.docker.com/r/domjudge/judgehost) `domjudge/judgehost:latest`。首次安装自动执行以下拉取操作，不下载评测源码、不执行 docker build：
 
@@ -266,7 +268,7 @@ docker pull domjudge/judgehost:latest
     └── api-password -> /etc/xcpc-judgehost/secrets/password
 ~~~
 
-config.json 不包含 API 密码；用于记录不可随意修改的身份、CPU、时区、API 地址、镜像标签/ID/摘要及评测程序实际版本。secrets 目录只允许 root 访问，以只读目录挂载进容器；安装器不会把实际密码放进 docker run 的环境变量值或参数；官方启动脚本在容器内部读取密码并生成 restapi.secret。私有 HTTPS API 可使用 高级设置中的“提供私有 CA 公开证书文件”，证书会被复制到正式 secrets 目录。不要用 TLS 私钥作为 CA 文件，也不要关闭 TLS 验证。
+config.json 不包含 API 密码；用于记录不可随意修改的身份、CPU、时区、API 地址、镜像标签/ID/摘要、评测程序实际版本，以及本次自动识别的 `cgroup_version` / `cgroup_mode`。这两个 cgroup 字段仅作记录，不用于强制选择；重新运行和健康检查都会按实际环境检测。secrets 目录只允许 root 访问，以只读目录挂载进容器；安装器不会把实际密码放进 docker run 的环境变量值或参数；官方启动脚本在容器内部读取密码并生成 restapi.secret。私有 HTTPS API 可使用 高级设置中的“提供私有 CA 公开证书文件”，证书会被复制到正式 secrets 目录。不要用 TLS 私钥作为 CA 文件，也不要关闭 TLS 验证。
 
 改密操作：先在主站禁用该机器的评测实例、等待正在执行的提交完成，然后在 DOMjudge 更新 API 账号密码，编辑各宿主机 `api-password` 链接指向的正式文件，只写新密码并保持权限 600；重启该机全部受管理的容器。容器入口会重新生成内部 restapi.secret。共享 API 账号时，所有使用该账号的宿主机都要同步。
 
@@ -315,11 +317,29 @@ docker restart xcpc-judgehost-1
 
 由运维人员确认初始化是否完整、是否已有比赛数据后，按官方维护流程修复；如果只是可以丢弃的首次安装测试机，可回到安装前快照，再从空白状态部署。
 
-### cgroup v1/v2 混合模式导致预检查失败
+<a id="cgroup-v1v2-混合模式导致预检查失败"></a>
 
-Ubuntu 24.04 和 Linux 6.8 支持 cgroup v2，但机器可能沿用旧的启动配置。若 `/sys/fs/cgroup` 是 tmpfs、`unified` 子目录是 cgroup2，而 memory/cpuset 子目录仍是 cgroup，说明当前为混合模式。如果 `docker info` 同时显示 `Cgroup Version: 1`，Docker 仍在使用 v1。仅存在 unified 子目录不能满足本工具对统一 v2 的要求。
+### cgroup 自动识别与排查
 
-以下命令只读取状态：
+无需填写 cgroup 版本。单机、SSH 批量安装和 `xcpc-check` 使用同一套检测规则：
+
+| 实际挂载 | 自动选择 | 检查条件 |
+| --- | --- | --- |
+| `/sys/fs/cgroup` 本身为 cgroup2 | v2 | 根层级可写、memory/cpuset 可用、内核 ≥5.19 |
+| 根目录为 tmpfs，控制器分别为 cgroup | v1 | memory、cpuset、cpu、cpuacct 的挂载可写；内存和 swap 统计文件可读；cpuset CPU/NUMA 节点非空 |
+| tmpfs 根目录、unified 子目录为 cgroup2，同时具有 v1 控制器 | v1 | 与上一行相同，不能把缺失的 v1 控制器用 v2 的同名控制器拼凑补齐 |
+| 缺少有效层级或控制器 | 停止并说明原因 | 不强制猜测版本或在线切换 |
+
+Docker 必须报告与检测结果一致的 cgroup 版本。容器启动后，健康检查还会读取容器内的层级，避免只检查宿主机而遗漏容器挂载问题。两种模式继续使用官方 `judgehost:latest`、host cgroup namespace 和同一套容器启动参数。
+
+混合模式的正常提示示例：
+
+~~~text
+cgroup 自动识别：hybrid → 使用 v1。
+PASS Docker 引擎：自动识别 cgroup v1（hybrid）
+~~~
+
+检查实际环境可执行以下只读命令：
 
 ~~~bash
 findmnt -R /sys/fs/cgroup -o TARGET,FSTYPE,OPTIONS
@@ -327,14 +347,15 @@ cat /proc/self/cgroup
 systemd-detect-virt
 docker info --format 'cgroup={{.CgroupVersion}} driver={{.CgroupDriver}}'
 cat /proc/cmdline
-grep -RnsE 'cgroup|unified' /etc/default/grub /etc/default/grub.d 2>/dev/null
 ~~~
 
-本工具 1.2.0 及更早版本还会把任意 `:/` 结尾的进程 cgroup 路径当成容器证据，这一判断不正确。例如物理机的 v1 cpuset 路径也可能是 `/`。1.2.1 已移除该误判，使用挂载信息区分 v1、混合模式与统一 v2；容器环境通过明确的容器检测识别。真实的 v1 / 混合模式限制仍然保留，具体错误现在直接显示在安装界面，完整诊断继续写入日志。
+v1 若提示缺少 swap accounting，检查 `/sys/fs/cgroup/memory/memory.memsw.limit_in_bytes` 和 `memory.memsw.max_usage_in_bytes`；若提示 cpu/cpuacct 挂载缺失，检查 `/sys/fs/cgroup/cpu`、`/sys/fs/cgroup/cpuacct` 是否指向对应合并挂载及 `cpuacct.usage` 是否可读。v2 若缺控制器或内核无法提供峰值内存统计，会给出对应提示，不会退到一个并不存在的可用 v1 环境。
 
-[Docker 官方说明](https://docs.docker.com/engine/containers/runmetrics/#changing-cgroup-version)：切换 cgroup 版本需要整机重启。先核对 `/proc/cmdline` 和实际生效的启动配置，寻找强制旧模式的设置（例如 `systemd.unified_cgroup_hierarchy=0`），再在维护窗口处理。不要直接覆盖整行 GRUB 配置，也不要为了绕过检查而在线卸载 memory/cpuset 或重新挂载 cgroup；现有 Docker/GPU 任务可能正在使用这些控制器。
+1.3.0 及更早版本曾强制要求统一 v2，这是安装器的限制，不是 DOMjudge 9.0 不支持 v1。1.4.0 已取消这一限制；之前仅因 v1/混合模式预检查失败的机器，可以运行新版并选择继续 / 重试，无需清空安装状态。是否可部署仍取决于此次检测到的具体功能是否齐全。
 
-安装器不会自动执行这项系统迁移。若当前不能修改启动模式或重启，请使用另一台已启用统一 v2 的独立评测主机。完成系统维护后，确认 `/sys/fs/cgroup` 本身为 cgroup2、根目录的 cgroup.controllers 包含 memory 和 cpuset、Docker 报告 cgroup 版本 2，再运行同一入口并选择继续 / 重试。预检查失败发生在 Docker 安装、镜像拉取和评测容器创建之前，只留下安装状态与日志，无需删除数据库、Docker 数据或整份状态文件来重试。
+自动识别与切换系统启动模式是两件事。现有 v1 满足条件时无需为本工具迁移到 v2。只有需要自行迁移系统模式时才涉及启动配置和重启，见 [Docker 说明](https://docs.docker.com/engine/containers/runmetrics/#changing-cgroup-version)。不要为了绕过检查在线卸载正在使用的控制器；安装器不会执行这项迁移。
+
+预检查失败发生在 Docker 安装、镜像拉取和评测容器创建之前，只留下安装状态与日志。修复提示中的具体问题后重试；不要删除数据库、Docker 数据或整份安装状态。
 
 ### Docker 拉取或启动失败
 

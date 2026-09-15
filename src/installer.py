@@ -191,6 +191,7 @@ def show_summary(cfg, args):
         print(f"  发行包：{args.artifact_dir or '从官方地址下载'}", flush=True)
     else:
         print("  镜像：domjudge/judgehost:latest（首次拉取，重试沿用已记录镜像）", flush=True)
+        print("  cgroup：自动识别 v1 / v2，按实际挂载及 Docker Engine 校验。", flush=True)
     print("不修改 GRUB/sysctl，不自动重启系统。", flush=True)
 
 
@@ -255,7 +256,7 @@ def main():
             args.role = {"1": "server", "2": "judgehost"}[action]
             break
     release = platform_check(args.role)
-    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", "1.2.0", "1.2.1", VERSION}:
+    if previous and previous.get("installer_version") not in {"1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.3.0", VERSION}:
         raise InstallError("已有其他版本安装状态；本入口不执行自动升级。")
     while True:
         cfg = configuration(args, previous) if args.yes else interactive_settings(args, previous)

@@ -1,6 +1,6 @@
 # 测试记录与复核方法
 
-记录日期：2026-09-15。安装器 1.3.0；主站 DOMjudge 9.0.1；评测镜像为官方 `domjudge/judgehost:latest`；CDS 2.6.1331；Live 3.5.0。
+记录日期：2026-09-15。安装器 1.4.0；主站 DOMjudge 9.0.1；评测镜像为官方 `domjudge/judgehost:latest`；CDS 2.6.1331；Live 3.5.0。
 
 ## 当前验证记录
 
@@ -8,20 +8,30 @@
 | --- | --- |
 | 自包含 main.sh 与源码/文档一致性、嵌入包摘要 | 通过 |
 | Bash 语法、ShellCheck | 通过 |
-| Python 离线行为测试 | 61 项通过 |
+| Python 离线行为测试 | 70 项通过 |
 | 中文交互向导 | 真实 TTY 进程替换启动、无效选项重填、密码不回显、取消不部署通过 |
 | 批量部署 | 内嵌入口字节一致性、凭据临时文件清理、Ansible 语法通过；不连接示例主机 |
 | 官方 latest 拉取及实际版本 | 9.0.0/release；直接使用官方镜像，未构建衍生镜像 |
-| cgroup v2 | Docker Engine 报告版本 2；官方 create_cgroups 成功；离线检查验证 v1 被拒绝 |
+| cgroup 自动检测 | v1、v2、混合挂载回归通过；真实 v2 挂载、Docker 报告和官方容器内检测一致 |
 | DOMserver 9.0.1 + 官方 judgehost 联测 | 两个容器注册成功，CPU 1/3、UID 62861/62863；容器内确认为 cgroup2fs |
 | HTTP / 私有 CA 的 HTTPS API | 两条链路均完成注册和实际评测 |
 | 真实测试提交 | C、C++、Java、Python 3（PyPy）各 1 个 AC；C 的 WA、CE、TLE 均符合预期 |
 
 本次镜像摘要：`sha256:4c01f07e49023bcadd92255786372ec4c5fb5335bec5c9366f07b1fdddb28567`。这是本次拉取记录，源码仍使用 `latest` 标签。测试覆盖镜像实际版本记录、首次拉取、重试保留原镜像、按摘要恢复缺失镜像、旧容器不被自动覆盖、官方 API 根地址参数、密码文件目录挂载和 CPU 配置。
 
+## 1.4.0 自动识别 cgroup v1/v2
+
+已检查 DOMjudge 9.0.1 的 create_cgroups / runguard 源码和本地记录的官方 latest 镜像，确认两者均以 `/sys/fs/cgroup` 根挂载是否为 cgroup2 选择 v2，否则走 v1。参考 [官方手册](https://www.domjudge.org/docs/manual/9.0/install-judgehost.html#linux-control-groups)。本版在安装前检查对应模式的控制器，并核对 Docker 版本；健康检查再次自动检测并读取每个容器内的实际层级。
+
+当前共 70 项离线测试。cgroup 测试覆盖：标准 v1、统一 v2、混合挂载按 v1 通过；只读 tmpfs 根目录加可写 v1 子挂载；cpu/cpuacct 合并挂载；v1 缺少 swap accounting、cpuacct 或 cpuset；只读控制器；混合模式控制器不完整；v2 老内核；Docker 与宿主机版本不一致；v1/v2 健康检查，以及容器层级不符。
+
+在本地 Docker Desktop 的真实 v2 层级下，使用官方镜像创建了临时容器，保持 host cgroup namespace 和可写 cgroup 绑定；实际运行新检测模块、Docker 版本核对及容器内检查均通过。探测只读，不连接 DOMjudge API、不调用官方初始化脚本、不提交程序；结束后删除临时容器。该结果不等于原生主机整机部署。
+
+**当前没有真实 cgroup v1 宿主机的判题联测结果。** v1 与混合模式依据官方源码和模拟挂载/文件回归验证，实际安装仍须在目标机验证 AC/WA/CE/TLE/MLE、内存统计和重启恢复。本版不更换镜像、容器启动参数或评测程序；下列实际提交结果来自先前 v2 联测。
+
 ## 1.3.0 系统兼容与评测机条件检查
 
-主站新增 Debian 12、Ubuntu 26.04；评测机取消 `/etc/os-release` 名称和版本白名单，保留 Linux amd64、root、systemd、内核、CPU 和完整 cgroup v2 检查。新增 18 项测试覆盖主站 Java 路径、未知发行版评测机放行、实际依赖复用、多种包管理器、RPM Engine 包查找、chronyd 服务，以及 Python 3.11.2 解压路径/链接/权限边界，以及内嵌包路径和链接拒绝。批量 SSH 的 Python 准备步骤同步支持这些包管理器。
+主站新增 Debian 12、Ubuntu 26.04；评测机取消 `/etc/os-release` 名称和版本白名单，当时保留 Linux amd64、root、systemd、内核、CPU 和统一 cgroup v2 检查（1.4.0 已改为自动识别 v1/v2）。新增 18 项测试覆盖主站 Java 路径、未知发行版评测机放行、实际依赖复用、多种包管理器、RPM Engine 包查找、chronyd 服务，以及 Python 3.11.2 解压路径/链接/权限边界，以及内嵌包路径和链接拒绝。批量 SSH 的 Python 准备步骤同步支持这些包管理器。
 
 主站组件联测使用官方 amd64 系统容器和三个经过固定 SHA-256 校验的应用发行包，调用实际安装模块完成系统软件包安装、DOMserver 编译、数据库初始化、网站根路径、只读同步账号、CDS 与 Live 配置，然后运行应用健康检查：
 
@@ -38,7 +48,7 @@ Ubuntu 26.04 容器中的 GNU tar 在此 amd64 模拟环境解压子目录时返
 
 ## 1.2.1 环境预检查修复
 
-新增 9 项回归测试：复现 v1/v2 混合挂载并准确报错、允许宿主机根 cgroup 路径、继续拒绝纯 v1 / 缺失控制器 / 明确检测到的 LXC、拒绝仅有非标准位置的 v2 挂载、安装前直接显示详细诊断、正常报告继续执行，以及子进程输出异常时保留日志。完整离线测试共 43 项。
+当时新增 9 项回归测试：复现 v1/v2 混合挂载并报错、允许宿主机根 cgroup 路径、继续拒绝纯 v1 / 缺失控制器 / 明确检测到的 LXC、拒绝仅有非标准位置的 v2 挂载、安装前直接显示详细诊断、正常报告继续执行，以及子进程输出异常时保留日志。当时完整离线测试共 43 项；其中强制拒绝 v1 / 混合模式的测试已在 1.4.0 调整为按实际功能判断。
 
 1.2.1 没有更换镜像、容器启动参数或判题程序；表中的真实提交、HTTP / HTTPS、双 CPU 判题与容器内 cgroup2fs 结果来自 1.2.0 的隔离联测，不将预检查修复表述为重新完成全部实机部署。此次也未替用户修改宿主机启动参数或重启服务器。
 
@@ -48,7 +58,7 @@ Ubuntu 26.04 容器中的 GNU tar 在此 amd64 模拟环境解压子目录时返
 
 先前自建 9.0.1 judgehost 的判题结果不能替代此次官方 latest 的验证。本次真实提交仅使用隔离测试站，不向用户已经部署的服务器提交测试数据。
 
-本地宿主机为 Apple Silicon，Docker Desktop 模拟 amd64。测试驱动手动启动主站 MariaDB、PHP-FPM 和 Nginx，绕过 systemd / NTP；**不算作原生 Linux 整机安装、systemd 开机恢复或时间同步通过**。正式入口仍严格要求完整 Linux、systemd、cgroup v2 和 chrony 验收。Docker Desktop 仅用于开发验证，不是本项目支持的正式评测宿主机。
+本地宿主机为 Apple Silicon，Docker Desktop 模拟 amd64。测试驱动手动启动主站 MariaDB、PHP-FPM 和 Nginx，绕过 systemd / NTP；**不算作原生 Linux 整机安装、systemd 开机恢复或时间同步通过**。正式入口仍严格要求完整 Linux、systemd、可用的 cgroup v1/v2 和 chrony 验收。Docker Desktop 仅用于开发验证，不是本项目支持的正式评测宿主机。
 
 Debian 13 分支、全新原生 amd64 主机上的完整一键流程、N 台真实 SSH 批量安装、断电/重启恢复、MLE 和各语言全部异常结果、长时间并发容量、OBS 画面、封榜/解榜需要在实际比赛环境继续验收。仓库 CI 运行静态及离线检查，不连接用户服务器。未来 latest 的新版本需要重新进行语言与判题验收。
 
@@ -68,10 +78,10 @@ ansible-playbook -i batch/inventory.example.yml batch/deploy.yml \
 
 ## 在全新 Linux VM 上验收
 
-1. 准备独立的主站与评测 VM。主站使用 Debian 12/13 或 Ubuntu 24.04/26.04 amd64；评测机可使用满足运行条件的 Linux amd64 发行版。主站建议 8 GiB RAM；评测机确保完整 cgroup v2 与可用 CPU 1。先保存快照。
+1. 准备独立的主站与评测 VM。主站使用 Debian 12/13 或 Ubuntu 24.04/26.04 amd64；评测机可使用满足运行条件的 Linux amd64 发行版。主站建议 8 GiB RAM；评测机确保完整 cgroup v1 或 v2 与可用 CPU 1；两种模式应分别准备环境验收。先保存快照。
 2. 主站以 root 运行 `bash main.sh`，选择菜单 1 并填写实际地址，等待 `xcpc-check` 全部通过。
 3. 在私有终端查看主站 judgehost API 凭据；在另一台 VM 选择菜单 2，填写 API URL、唯一主机名、CPU 编号和 API 密码。
-4. 核对 config.json 中的镜像实际版本、ID、摘要，确认 `docker info` 使用 cgroup v2，主站 Judgehosts 页显示启用状态和近期心跳，再运行 `xcpc-check`。
+4. 核对 config.json 中的镜像实际版本、ID、摘要，确认自动识别结果与 `docker info` 的 cgroup 版本一致，主站 Judgehosts 页显示启用状态和近期心跳，再运行 `xcpc-check`。
 5. 在测试比赛中提交各语言 AC/WA/CE/TLE/MLE 样例，核对主站、CDS、Live 三端结果。
 6. 在维护窗口测试重启：Docker、chrony、主站 systemd 服务应恢复，评测机重新产生心跳；再进行封榜及 OBS 实机演练。
 7. 用菜单 3 扩展到多台，核对每台结果及镜像摘要；单台成功不等于全部机器成功。

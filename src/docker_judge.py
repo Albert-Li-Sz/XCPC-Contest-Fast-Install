@@ -3,11 +3,14 @@ import grp
 import hashlib
 import json
 import math
+import platform
 from pathlib import Path
 import pwd
 import re
 import subprocess
 import time
+
+import cgroups
 
 from common import (InstallError, mkdir, write, link, request, wait_for)
 
@@ -128,6 +131,10 @@ def preflight(rt):
         if not isinstance(errors, list) or not all(isinstance(e, str) for e in errors):
             raise ValueError("Malformed preflight errors")
         ok = report["ok"] is True
+        selected = report.get("cgroup")
+        if ok and (not isinstance(selected, dict) or selected.get("version") not in {"1", "2"}
+                   or selected.get("mode") not in {"v1", "v2", "hybrid"}):
+            raise ValueError("Missing cgroup selection")
     except (ValueError, KeyError, TypeError):
         raise InstallError(f"环境检查未返回有效诊断；查看私有日志 {rt.log}") from None
     if result.returncode or not ok or errors:
@@ -136,10 +143,42 @@ def preflight(rt):
                            "\n安装已停止，本次尚未执行 Docker 安装或创建评测容器；不会修改 GRUB/sysctl 或自动重启。"
                            "\n请检查：findmnt -R /sys/fs/cgroup -o TARGET,FSTYPE,OPTIONS"
                            "\n完整诊断：" + str(rt.log))
+    selected = report["cgroup"]
+    print(f"cgroup 自动识别：{selected['mode']} → 使用 v{selected['version']}。", flush=True)
+    return selected
+
+
+def validate_engine(info, selected):
+    if info.get("OSType") != "linux" or any("rootless" in option for option in info.get("SecurityOptions", [])):
+        raise InstallError("Docker 必须是本机 Linux rootful 引擎。")
+    version = str(info.get("CgroupVersion", ""))
+    if version not in {"1", "2"}:
+        raise InstallError("Docker 未报告有效的 cgroup 版本，请检查本机 Engine。")
+    if version != selected["version"]:
+        raise InstallError(f"Docker 使用 cgroup v{version}，宿主机挂载选择 v{selected['version']}；请检查引擎和挂载，脚本不会自动切换系统模式。")
+    return version
+
+
+def check_container_cgroup(name, version):
+    # Read the container's own mounts: do not assume a host bind was effective.
+    script = """if [ "$(stat -f -c %T /sys/fs/cgroup)" = cgroup2fs ]; then
+    echo 2
+else
+    test -r /sys/fs/cgroup/memory/memory.memsw.limit_in_bytes
+    test -r /sys/fs/cgroup/memory/memory.memsw.max_usage_in_bytes
+    test -r /sys/fs/cgroup/cpuacct/cpuacct.usage
+    test -n "$(cat /sys/fs/cgroup/cpuset/cpuset.cpus)"
+    test -n "$(cat /sys/fs/cgroup/cpuset/cpuset.mems)"
+    echo 1
+fi"""
+    result = subprocess.run(DOCKER + ["exec", name, "/bin/sh", "-ec", script],
+                            capture_output=True, text=True, timeout=20, check=False)
+    if result.returncode or result.stdout.strip() != version:
+        raise InstallError(f"{name} 容器内的 cgroup 层级与宿主机 v{version} 不符或缺少控制器文件；检查可写挂载及容器日志。")
 
 
 def install(rt, cfg, args, ask):
-    preflight(rt)
+    selected = preflight(rt)
     online_raw = Path("/sys/devices/system/cpu/online").read_text().strip()
     online = set()
     for segment in online_raw.split(","):
@@ -187,10 +226,9 @@ def install(rt, cfg, args, ask):
     from judge_dependencies import prepare
     rt.step("Docker Engine 与时间同步", lambda: prepare(rt, cfg))
     info = json.loads(rt.run(DOCKER + ["info", "--format", "{{json .}}"], capture=True))
-    if info.get("OSType") != "linux" or info.get("CgroupVersion") != "2":
-        raise InstallError("Docker 必须是本机 Linux rootful 引擎，使用 cgroup v2。")
-    if any("rootless" in option for option in info.get("SecurityOptions", [])):
-        raise InstallError("judgehost 不支持本方案中的 rootless Docker。")
+    cfg["cgroup_version"] = validate_engine(info, selected)
+    cfg["cgroup_mode"] = selected["mode"]
+    rt.save()
 
     prepare_image(rt, cfg)
     mkdir(CONFIG, 0o700)
@@ -234,7 +272,7 @@ def install(rt, cfg, args, ask):
     link(CONFIG / "secrets/password", "/root/contest/judgehost/api-password")
     write("/root/contest/README.md",
           "# Docker 评测机\n\n配置：judgehost/config.json；密码：judgehost/api-password（root 专用）。\n"
-          "镜像：官方 domjudge/judgehost:latest；cgroup v2；实际版本和摘要见 config.json。\n"
+          "镜像：官方 domjudge/judgehost:latest；cgroup v1/v2 自动识别；本次结果、镜像版本和摘要见 config.json。\n"
           "检查：xcpc-check；日志：docker logs xcpc-judgehost-CPU编号。\n"
           "改密后需重启容器；维护前在主站禁用并等待当前评测完成。\n"
           "不要直接修改 CPU/主机名；不要删除 judgings 数据卷。\n"
@@ -242,11 +280,16 @@ def install(rt, cfg, args, ask):
 
 
 def check():
-    cgroups = subprocess.run(DOCKER + ["info", "--format", "{{.CgroupVersion}}"],
-                             capture_output=True, text=True, check=False)
-    if cgroups.returncode or cgroups.stdout.strip() != "2":
-        raise InstallError("本机 Docker 必须使用 cgroup v2。")
-    print("PASS Docker 引擎：cgroup v2", flush=True)
+    selected, errors = cgroups.detect()
+    errors += cgroups.kernel_errors(selected, platform.release())
+    if errors:
+        raise InstallError("cgroup 自动检查失败：\n  - " + "\n  - ".join(errors))
+    result = subprocess.run(DOCKER + ["info", "--format", "{{json .}}"],
+                            capture_output=True, text=True, timeout=30, check=False)
+    if result.returncode:
+        raise InstallError("无法读取本机 Docker Engine 状态。")
+    version = validate_engine(json.loads(result.stdout), selected)
+    print(f"PASS Docker 引擎：自动识别 cgroup v{version}（{selected['mode']}）", flush=True)
     cfg = json.loads((CONFIG / "config.json").read_text())
     password = (CONFIG / "secrets/password").read_text().strip()
     ca = CONFIG / "secrets/api-ca.crt"
@@ -262,6 +305,7 @@ def check():
                 or current["HostConfig"].get("CgroupnsMode") != "host"
                 or current["HostConfig"].get("CpusetCpus") != str(cpu)):
             raise InstallError(f"{name} 运行配置与记录不一致。")
+        check_container_cgroup(name, version)
         print(f"PASS Docker：{name}，CPU {cpu}，评测程序 {cfg.get('judgehost_version', '未记录')}，镜像 {cfg.get('image_ref', '旧版')}", flush=True)
     def heartbeat():
         records = request(cfg["api_url"] + "judgehosts", cfg["api_user"], password, ca=ca)

@@ -7,7 +7,7 @@ xcpc_main() {
         case "$arg" in
             -h|--help)
                 cat <<'HELP'
-XCPC 快速部署 1.3.0
+XCPC 快速部署 1.4.0
 直接运行即可进入中文交互菜单，无需追加安装参数：
   bash main.sh
 
@@ -21,13 +21,13 @@ XCPC 快速部署 1.3.0
 
 地址、CPU、账号、密码及高级设置均在向导中填写。
 主站支持 Debian 12/13、Ubuntu 24.04/26.04；评测机不限制发行版版本。
-安装目标仍须 Linux amd64、root、systemd；评测机还须完整 cgroup v2。
+安装目标仍须 Linux amd64、root、systemd；评测机自动识别 cgroup v1/v2 并检查所需控制器。
 批量控制端支持具有 Python 3.11+ 和 OpenSSH 的 Linux/macOS。
 不修改 GRUB/sysctl，不自动重启；已有部署可从菜单继续或检查。
 
 HELP
                 return 0 ;;
-            --version) echo 'XCPC Fast Install 1.3.0'; return 0 ;;
+            --version) echo 'XCPC Fast Install 1.4.0'; return 0 ;;
         esac
     done
     if ! command -v python3 >/dev/null; then
